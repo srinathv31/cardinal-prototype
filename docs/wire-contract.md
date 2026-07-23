@@ -264,3 +264,55 @@ asserts through its read-only tools.
 4. Approval gates are real pauses: a paused run has no server-side timer and
    resumes only via §4's human response.
 5. Every run step is reconstructable from `GET /api/events`.
+
+---
+
+## 8. Mechanical replay (W4.4)
+
+`scripts/demo-replay.mjs` is a checked-in, dependency-free Node script that
+drives every beat of the demo script (brief §3, beats 0–6) purely over
+HTTP/SSE against this contract — no browser, no API key, no network beyond
+the target host. It's the brief §10 P4 phase gate: "the complete demo script
+replays clean, repeatedly."
+
+**Run it:**
+
+```sh
+DEMO_SCRIPTED_DELAY_MS=0 npm run dev   # in one terminal
+npm run verify:demo                    # in another
+```
+
+`DEMO_REPLAY_URL` (default `http://localhost:3000`) points the replay at a
+running server. If nothing answers there, the script starts its own
+(`npx next dev -p 4312`, no provider env vars, `DEMO_SCRIPTED_DELAY_MS=0`)
+and tears it down when it finishes. `DEMO_SCRIPTED_DELAY_MS=0` only affects
+pacing (brief §8.3) — the replay passes at the default delay too, just
+slower.
+
+**What it covers**, as sequential named beats (each prints `PASS`/`FAIL
+<beat>: <detail>`; the process exits non-zero on any failure):
+
+- **Beat 0** — `POST /api/reset` and `GET /api/events` reach the opening
+  state; `GET /` renders all three agent names.
+- **Beat 1** — `GET /workflows` renders the palette's five node labels.
+- **Beats 2–4** — one full run per monitor agent, mirroring the client's
+  `DefaultChatTransport` request body exactly (§1): the trigger StreamEvent
+  as the first user message, a hand-rolled reducer over the raw
+  `UIMessageChunk` SSE stream (§2) asserting narration arrives, the agent's
+  `renderEvidence` sequence matches its script.ts exactly, its action
+  tool(s) reach `approval-requested`, then a resume POST built the way
+  `addToolApprovalResponse` + `lastAssistantMessageIsCompleteWithApprovalResponses`
+  build it (§4) — approving every pending tool and re-sending the full
+  history — asserting the action tool(s) execute and a closing narration
+  arrives.
+- **Beat 5** — both rehearsed Ask questions (brief §8.2), asserting the
+  expected evidence component (`CategoryPie` / `BarBreakdown`) and a clean
+  finish.
+- **Beat 6** — `GET /api/events` covers every run from beats 2–5, including
+  an `actor:'human'`, `kind:'approval.granted'` entry per approved action
+  tool.
+- **Repeatability** — resets, replays Payment Health alone, and asserts its
+  two action tools' `confirmationId`s are byte-identical to the first pass
+  (`lib/agents/payment-health/tools.ts` derives them deterministically from
+  `accountId` — never random — which is exactly what "replays clean,
+  repeatedly" requires).
