@@ -7,6 +7,8 @@
 // ISO timestamp; only the date part is read, always in UTC — matching the
 // seed's day-offset anchoring (lib/soe/seed/anchor.ts).
 
+import { getAnchor } from '@/lib/soe';
+
 const DAY_MS = 86_400_000;
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -55,16 +57,18 @@ export function monthLabels(isoDates: string[]): string[] {
   return isoDates.map((iso, i) => `${short[i]} ${Number(iso.slice(8, 10))}`);
 }
 
-/** Whole days since an ISO date (positive = in the past), against the wall
- * clock — the same convention as the seed's default anchor. */
+/** Whole days since an ISO date (positive = in the past), against the demo
+ * anchor (`getAnchor()` — start of today UTC, or DEMO_ANCHOR_DATE when
+ * pinned), so day counts hold on pinned rehearsal dates. */
 export function daysSince(iso: string): number {
-  return Math.floor((Date.now() - utcDate(iso).getTime()) / DAY_MS);
+  return Math.floor((getAnchor().getTime() - utcDate(iso).getTime()) / DAY_MS);
 }
 
-/** Whole days until an ISO date (positive = in the future). Ceil, so a date
- * N midnights away reads "N days" all day long. */
+/** Whole days until an ISO date (positive = in the future), against the demo
+ * anchor (`getAnchor()` — start of today UTC, or DEMO_ANCHOR_DATE when
+ * pinned), so day counts hold on pinned rehearsal dates. */
 export function daysUntil(iso: string): number {
-  return Math.ceil((utcDate(iso).getTime() - Date.now()) / DAY_MS);
+  return Math.ceil((utcDate(iso).getTime() - getAnchor().getTime()) / DAY_MS);
 }
 
 /** YYYY-MM-DD shifted by whole days, in UTC. */
