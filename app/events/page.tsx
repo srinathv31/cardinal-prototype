@@ -1,15 +1,16 @@
 import { PageHeader } from "@/components/shell/page-header";
+import { EventLogTable } from "@/components/event-log/event-log-table";
 
+// Server shell (brief §5b) — all filtering/polling state lives in the
+// client component; this route only renders the header and mounts it.
 export default function EventLogPage() {
   return (
     <div>
       <PageHeader
         title="Event Log"
-        description="Every run, tool call, and approval — timestamped and attributable. (P3: filterable audit table, W3.2.)"
+        description="Agents act, humans approve, everything is auditable — every run, tool call, and approval gate, timestamped and attributable."
       />
-      <div className="grid h-64 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">
-        Audit table shell — built in P3 (W3.2)
-      </div>
+      <EventLogTable />
     </div>
   );
 }

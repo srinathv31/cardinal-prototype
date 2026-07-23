@@ -1,12 +1,15 @@
 "use client";
 
-// DEV-ONLY REGISTRY SHOWCASE (W1.2, extended W2.3 to cover the P2 set).
-// Renders every registry component (brief §5c) from typed fixture
-// RenderInstruction/props objects, with story-plausible values (Marcus Webb
-// for P1, Elena and the Patels for P2) — this is how the registry gets
-// visually verified without an LLM key. Not part of the §4 screen inventory.
-// Delete this page (or the P1 agent will replace it) before the demo ships;
-// it superseded the P0 lib/soe smoke-test that lived at this route.
+// DEV-ONLY REGISTRY SHOWCASE (W1.2, extended W2.3 to cover the P2 set, W3.3
+// to cover the final P3 set). Renders every registry component (brief §5c)
+// from typed fixture RenderInstruction/props objects, with story-plausible
+// values (Marcus Webb for P1, Elena and the Patels for P2, portfolio-wide Ask
+// data for P3) — this is how the registry gets visually verified without an
+// LLM key. Not part of the §4 screen inventory. Delete this page before the
+// demo ships; it superseded the P0 lib/soe smoke-test that lived at this
+// route. The three P3 fixtures are parsed through renderInstructionSchema
+// (not just TS-annotated like the earlier fixtures) so schema drift fails
+// fast right here rather than silently at render time.
 
 import { useState } from "react";
 import { PageHeader } from "@/components/shell/page-header";
@@ -15,10 +18,11 @@ import {
   OutreachDraftCard,
   ApprovalCard,
 } from "@/components/registry";
-import type {
-  RenderInstruction,
-  OutreachDraftCardProps,
-  ApprovalCardProps,
+import {
+  renderInstructionSchema,
+  type RenderInstruction,
+  type OutreachDraftCardProps,
+  type ApprovalCardProps,
 } from "@/lib/registry/schemas";
 
 const metricRowFixture: RenderInstruction = {
@@ -226,6 +230,104 @@ const partyGraphFixture: RenderInstruction = {
   },
 };
 
+// P3 (W3.3) fixtures — Ask surface evidence. Parsed through
+// renderInstructionSchema (not just TS-annotated) so a schema/props drift
+// fails fast on this page instead of only showing up at render time.
+const barBreakdownFixture: RenderInstruction = renderInstructionSchema.parse({
+  component: "BarBreakdown",
+  props: {
+    title: "Balance transfers expiring within 90 days",
+    unit: "currency",
+    bars: [
+      {
+        label: "Alicia Thompson",
+        value: 1750,
+        display: "$1,750.00",
+        detail: "Promo ends Sep 4, 2026 · 30 days · go-to 22.99%",
+        tone: "warning",
+      },
+      {
+        label: "Elena Ruiz",
+        value: 5100,
+        display: "$5,100.00",
+        detail: "Promo ends Sep 19, 2026 · 45 days · go-to 24.99%",
+        tone: "warning",
+      },
+      {
+        label: "Fatima Al-Sayed",
+        value: 6000,
+        display: "$6,000.00",
+        detail: "Promo ends Oct 19, 2026 · 75 days · go-to 26.99%",
+        tone: "neutral",
+      },
+    ],
+    footnote: "3 portfolio accounts have a BT promo ending within 90 days.",
+  },
+});
+
+const categoryPieFixture: RenderInstruction = renderInstructionSchema.parse({
+  component: "CategoryPie",
+  props: {
+    title: "Portfolio spend by category — trailing 3 mo",
+    slices: [
+      { label: "Retail", value: 14200, display: "$14,200.00", share: "34%" },
+      { label: "Grocery", value: 8100, display: "$8,100.00", share: "19%" },
+      { label: "Travel", value: 6300, display: "$6,300.00", share: "15%" },
+      { label: "Dining", value: 5200, display: "$5,200.00", share: "12%" },
+      { label: "Utilities", value: 2800, display: "$2,800.00", share: "8%" },
+      { label: "Fuel", value: 3100, display: "$3,100.00", share: "7%" },
+      { label: "Subscription", value: 1400, display: "$1,400.00", share: "3%" },
+      { label: "Other", value: 835, display: "$835.00", share: "2%" },
+    ],
+    total: { label: "Total spend · trailing 3 mo", value: "$41,935.00" },
+  },
+});
+
+const transactionTableFixture: RenderInstruction = renderInstructionSchema.parse({
+  component: "TransactionTable",
+  props: {
+    title: "Recent transactions — portfolio-wide",
+    rows: [
+      {
+        postedDate: "Jul 21, 2026",
+        merchantName: "Amazon",
+        category: "RETAIL",
+        amount: "$412.19",
+        accountLabel: "Jordan Kim · bg-001",
+      },
+      {
+        postedDate: "Jul 20, 2026",
+        merchantName: "Delta Air Lines",
+        category: "TRAVEL",
+        amount: "$618.40",
+        accountLabel: "Robert Chen · bg-003",
+      },
+      {
+        postedDate: "Jul 19, 2026",
+        merchantName: "Whole Foods",
+        category: "GROCERY",
+        amount: "$96.72",
+        accountLabel: "Fatima Al-Sayed · bg-005",
+      },
+      {
+        postedDate: "Jul 19, 2026",
+        merchantName: "Shell",
+        category: "FUEL",
+        amount: "$54.10",
+        accountLabel: "Luis Ortega · bg-004",
+      },
+      {
+        postedDate: "Jul 18, 2026",
+        merchantName: "Netflix",
+        category: "SUBSCRIPTION",
+        amount: "$15.49",
+        accountLabel: "Grace Nakamura · bg-006",
+      },
+    ],
+    footnote: "Showing 5 of 214 transactions · trailing 3 months",
+  },
+});
+
 // Malformed on purpose — simulates a wire payload outside the registry to
 // verify EvidenceRenderer's "never throw" guarantee (wire-contract §3,
 // brief §8). Cast is deliberate; real callers never get an invalid
@@ -316,6 +418,18 @@ export default function ScratchPage() {
 
       <ShowcaseSection label="PartyGraph" tool="renderEvidence → EvidenceRenderer">
         <EvidenceRenderer instruction={partyGraphFixture} />
+      </ShowcaseSection>
+
+      <ShowcaseSection label="BarBreakdown" tool="renderEvidence → EvidenceRenderer">
+        <EvidenceRenderer instruction={barBreakdownFixture} />
+      </ShowcaseSection>
+
+      <ShowcaseSection label="CategoryPie" tool="renderEvidence → EvidenceRenderer">
+        <EvidenceRenderer instruction={categoryPieFixture} />
+      </ShowcaseSection>
+
+      <ShowcaseSection label="TransactionTable" tool="renderEvidence → EvidenceRenderer">
+        <EvidenceRenderer instruction={transactionTableFixture} />
       </ShowcaseSection>
 
       <ShowcaseSection

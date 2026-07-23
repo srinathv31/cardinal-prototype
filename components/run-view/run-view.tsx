@@ -6,7 +6,7 @@
 // business logic — this component only wires wire-contract state
 // (docs/wire-contract.md) to the three pane renderers and static copy.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { Badge } from "@/components/ui/badge";
@@ -26,10 +26,14 @@ export function RunView({
   trigger,
   agentId,
   agentName,
+  autoStart,
 }: {
   trigger: StreamEvent;
   agentId: string;
   agentName: string;
+  /** W3.4 Workflow Canvas handoff — fire handleRun() once on mount instead
+   * of waiting for the presenter to click the trigger card. */
+  autoStart?: boolean;
 }) {
   // Remounting on a bumped key regenerates runId and drops all chat state —
   // the "New run" control (full reset-to-opening-state is P4, brief §8.5).
@@ -40,6 +44,7 @@ export function RunView({
       trigger={trigger}
       agentId={agentId}
       agentName={agentName}
+      autoStart={autoStart}
       onNewRun={() => setInstanceKey((k) => k + 1)}
     />
   );
@@ -49,11 +54,13 @@ function RunViewInstance({
   trigger,
   agentId,
   agentName,
+  autoStart,
   onNewRun,
 }: {
   trigger: StreamEvent;
   agentId: string;
   agentName: string;
+  autoStart?: boolean;
   onNewRun: () => void;
 }) {
   const [runId] = useState(() => `run-${crypto.randomUUID()}`);
@@ -84,6 +91,20 @@ function RunViewInstance({
   function handleRun() {
     sendMessage({ text: JSON.stringify(trigger, null, 2) });
   }
+
+  // W3.4 Workflow Canvas handoff: fire the trigger once on mount so the run
+  // view opens already started. Guarded with a ref (not just `!hasStarted`)
+  // because React StrictMode double-invokes effects on mount in dev — without
+  // the ref, the second invocation would still see `hasStarted === false`
+  // (messages haven't round-tripped yet) and send the trigger message twice.
+  const autoStartFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoStart && !hasStarted && !autoStartFiredRef.current) {
+      autoStartFiredRef.current = true;
+      handleRun();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   return (
     <div className="flex flex-col gap-6">

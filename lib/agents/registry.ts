@@ -14,19 +14,22 @@ import {
   type BTLifecycleUIMessage,
 } from './bt-lifecycle/agent';
 import { createAUGrowthAgent, type AUGrowthUIMessage } from './au-growth/agent';
+import { createAskAgent, type AskUIMessage } from './ask/agent';
 
 export type CardinalUIMessage =
   | PaymentHealthUIMessage
   | BTLifecycleUIMessage
-  | AUGrowthUIMessage;
+  | AUGrowthUIMessage
+  | AskUIMessage;
 
-export const AGENT_IDS = ['payment-health', 'bt-lifecycle', 'au-growth'] as const;
+export const AGENT_IDS = ['payment-health', 'bt-lifecycle', 'au-growth', 'ask'] as const;
 export type CardinalAgentId = (typeof AGENT_IDS)[number];
 
 export const AGENT_NAMES: Record<CardinalAgentId, string> = {
   'payment-health': 'Payment Health',
   'bt-lifecycle': 'BT Lifecycle',
   'au-growth': 'AU Growth',
+  ask: 'Ask',
 };
 
 export function isCardinalAgentId(value: string): value is CardinalAgentId {
@@ -67,6 +70,12 @@ export async function createAgentRunStreamResponse(options: {
       const uiMessages = await validateUIMessages<AUGrowthUIMessage>({ messages });
       onValidated(uiMessages);
       const agent = createAUGrowthAgent({ runId });
+      return createAgentUIStreamResponse({ agent, uiMessages });
+    }
+    case 'ask': {
+      const uiMessages = await validateUIMessages<AskUIMessage>({ messages });
+      onValidated(uiMessages);
+      const agent = createAskAgent({ runId });
       return createAgentUIStreamResponse({ agent, uiMessages });
     }
   }

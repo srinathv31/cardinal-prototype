@@ -1,15 +1,19 @@
+// Workflow Canvas route (brief §4 screen 2; W3.4). Server shell only — all
+// canvas state (nodes/edges/name) and the Run handoff live in the client
+// component (brief §5b: zero business logic in components, and there is no
+// server data to fetch here at all).
+
 import { PageHeader } from "@/components/shell/page-header";
+import { WorkflowCanvas } from "@/components/workflow-canvas/workflow-canvas";
 
 export default function WorkflowCanvasPage() {
   return (
     <div>
       <PageHeader
         title="Workflow Canvas"
-        description="Compose an agent workflow from the node palette and run it. (P3: React Flow canvas, W3.4.)"
+        description="Compose an agent workflow from the node palette and run it."
       />
-      <div className="grid h-64 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">
-        Canvas shell — built in P3 (W3.4)
-      </div>
+      <WorkflowCanvas />
     </div>
   );
 }

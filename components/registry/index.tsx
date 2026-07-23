@@ -1,8 +1,17 @@
+"use client";
+
 // Registry barrel + evidence router (brief §5c). `EvidenceRenderer` is the
 // only place that maps a `renderEvidence` output's `component` name to a
 // concrete renderer. Per docs/wire-contract.md §3, an unknown or non-evidence
 // component name renders nothing and logs a console error — it must never
 // throw (demo-safety rule, brief §8).
+//
+// "use client" belongs on this barrel: registry components are the wire
+// contract's client renderer layer, their props are serializable by
+// construction (Zod-validated JSON, §5b), and several members reach Radix
+// Slot (via ui/badge, ui/button), which calls createContext at module scope
+// and cannot evaluate inside the React Server graph. Server components (e.g.
+// the dashboard KPI row) import from here and get client references.
 //
 // OutreachDraftCard and ApprovalCard are registry members but are not driven
 // by RenderInstruction (they render from action-tool parts/approval state
@@ -18,6 +27,9 @@ import { InterestProjectionChart } from "./interest-projection-chart";
 import { PartyGraph } from "./party-graph";
 import { OutreachDraftCard } from "./outreach-draft-card";
 import { ApprovalCard } from "./approval-card";
+import { BarBreakdown } from "./bar-breakdown";
+import { CategoryPie } from "./category-pie";
+import { TransactionTable } from "./transaction-table";
 
 export {
   MetricRow,
@@ -29,6 +41,9 @@ export {
   PartyGraph,
   OutreachDraftCard,
   ApprovalCard,
+  BarBreakdown,
+  CategoryPie,
+  TransactionTable,
 };
 
 export function EvidenceRenderer({
@@ -51,6 +66,12 @@ export function EvidenceRenderer({
       return <InterestProjectionChart {...instruction.props} />;
     case "PartyGraph":
       return <PartyGraph {...instruction.props} />;
+    case "BarBreakdown":
+      return <BarBreakdown {...instruction.props} />;
+    case "CategoryPie":
+      return <CategoryPie {...instruction.props} />;
+    case "TransactionTable":
+      return <TransactionTable {...instruction.props} />;
     case "OutreachDraftCard":
     case "ApprovalCard":
       // Registry members, but not evidence — they render from action-tool

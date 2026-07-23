@@ -18,8 +18,22 @@ export interface RunConfig {
   trigger: StreamEvent;
 }
 
-export function RunSwitcher({ runs }: { runs: RunConfig[] }) {
-  const [activeAgentId, setActiveAgentId] = useState<string | undefined>(runs[0]?.agentId);
+export function RunSwitcher({
+  runs,
+  autostartAgentId,
+}: {
+  runs: RunConfig[];
+  /** W3.4 Workflow Canvas handoff (?autostart=<agentId>) — selects that run's
+   * tab up front and tells its RunView to self-start (falls back to the
+   * first run when absent/unrecognized). */
+  autostartAgentId?: string;
+}) {
+  // Only honor autostartAgentId when it names one of this page's actual runs
+  // — an unrecognized value must fall back cleanly rather than select no tab.
+  const autostartRunExists = runs.some((run) => run.agentId === autostartAgentId);
+  const [activeAgentId, setActiveAgentId] = useState<string | undefined>(
+    autostartRunExists ? autostartAgentId : runs[0]?.agentId,
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,7 +63,12 @@ export function RunSwitcher({ runs }: { runs: RunConfig[] }) {
 
       {runs.map((run) => (
         <div key={run.agentId} className={run.agentId === activeAgentId ? "block" : "hidden"}>
-          <RunView trigger={run.trigger} agentId={run.agentId} agentName={run.agentName} />
+          <RunView
+            trigger={run.trigger}
+            agentId={run.agentId}
+            agentName={run.agentName}
+            autoStart={run.agentId === autostartAgentId}
+          />
         </div>
       ))}
     </div>

@@ -45,6 +45,30 @@ const projectionMonths = z
   .default(12)
   .describe('How many months to project forward');
 
+const spendMonths = z
+  .number()
+  .int()
+  .min(1)
+  .max(12)
+  .default(3)
+  .describe('How many trailing months of portfolio spend to include');
+
+const windowDays = z
+  .number()
+  .int()
+  .min(30)
+  .max(365)
+  .default(90)
+  .describe('How many days ahead to look for BT promo expirations');
+
+const rowLimit = z
+  .number()
+  .int()
+  .min(1)
+  .max(25)
+  .default(15)
+  .describe('Maximum transaction rows to return');
+
 export const evidenceSpecSchema = z.discriminatedUnion('component', [
   z.object({
     component: z.literal('MetricRow'),
@@ -52,6 +76,7 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
       z.object({ kind: z.literal('account-overview'), accountId }),
       z.object({ kind: z.literal('bt-overview'), accountId }),
       z.object({ kind: z.literal('au-recurring-spend'), accountId, partyId }),
+      z.object({ kind: z.literal('portfolio-overview') }),
     ]),
   }),
   z.object({
@@ -106,6 +131,26 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
     source: z.object({
       kind: z.literal('household-overview'),
       accountId,
+    }),
+  }),
+  z.object({
+    component: z.literal('BarBreakdown'),
+    source: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('portfolio-category-spend'), months: spendMonths }),
+      z.object({ kind: z.literal('bt-expiring-accounts'), windowDays }),
+    ]),
+  }),
+  z.object({
+    component: z.literal('CategoryPie'),
+    source: z.object({ kind: z.literal('portfolio-category-spend'), months: spendMonths }),
+  }),
+  z.object({
+    component: z.literal('TransactionTable'),
+    source: z.object({
+      kind: z.literal('recent-transactions'),
+      accountId: accountId.optional().describe('Omit for a portfolio-wide table'),
+      months: spendMonths,
+      limit: rowLimit,
     }),
   }),
 ]);

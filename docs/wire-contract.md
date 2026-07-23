@@ -29,9 +29,14 @@ Starts **or resumes** an agent run. Request body (the AI SDK
 }
 ```
 
-- `agentId` ∈ `payment-health` (P1) · `bt-lifecycle` · `au-growth` (P2).
+- `agentId` ∈ `payment-health` (P1) · `bt-lifecycle` · `au-growth` (P2) ·
+  `ask` (P3, W3.3).
 - The **first** message of a run is a user message whose text is a JSON
   `StreamEvent` (the trigger, e.g. Marcus's `autopay.failed`) — see §6.
+  **Exception: `ask`.** Ask has no trigger event; its first (and every
+  subsequent) user message is a plain-English portfolio question, sent as
+  plain text, not JSON. Ask is also read-only — no action tools, no
+  `toolApproval` config — so §4 never applies to an `ask` run.
 - A **resume** call is byte-identical in shape: the client re-POSTs the full
   history after appending approval responses to the last assistant message
   (§4). The server executes approved tools and continues the loop.
@@ -136,7 +141,9 @@ Registry (P1 set ships now; rest land with their beats):
 | BTTimeline | `btTimelinePropsSchema` | P2 (W2.1) |
 | InterestProjectionChart | `interestProjectionChartPropsSchema` | P2 (W2.1) |
 | PartyGraph | `partyGraphPropsSchema` | P2 (W2.2) |
-| BarBreakdown · CategoryPie · TransactionTable | — | P3 (W3.3) |
+| BarBreakdown | `barBreakdownPropsSchema` | P3 (W3.3) |
+| CategoryPie | `categoryPiePropsSchema` | P3 (W3.3) |
+| TransactionTable | `transactionTablePropsSchema` | P3 (W3.3) |
 
 Adding a component = props schema + renderer + one union member (§5c).
 
@@ -226,6 +233,9 @@ by agent:
 | payment-health | `evt-marcus-autopay-failed` | `autopay.failed` |
 | bt-lifecycle | `evt-elena-promo-expiring` | `bt.promo_expiring` |
 | au-growth | `evt-patel-statement` | `statement.generated` |
+
+`ask` has no trigger event and is not in this table — its first user message
+is a plain-English question instead of a `StreamEvent` (§1 exception).
 
 Example (payment-health):
 

@@ -5,10 +5,10 @@
 // preformatted strings computed server-side; raw numbers appear only where a
 // chart needs geometry. See docs/wire-contract.md §3.
 //
-// P1 shipped the Payment Health set; P2 adds BTTimeline,
-// InterestProjectionChart (W2.1) and PartyGraph (W2.2). Remaining members
-// (BarBreakdown, CategoryPie, TransactionTable) land in P3: schema here +
-// renderer + one union member.
+// P1 shipped the Payment Health set; P2 added BTTimeline,
+// InterestProjectionChart (W2.1) and PartyGraph (W2.2). P3 (W3.3) ships the
+// final three — BarBreakdown, CategoryPie, TransactionTable — completing the
+// brief §5c registry.
 
 import { z } from 'zod';
 
@@ -184,6 +184,73 @@ export const approvalCardPropsSchema = z.object({
 });
 export type ApprovalCardProps = z.infer<typeof approvalCardPropsSchema>;
 
+export const transactionCategorySchema = z.enum([
+  'GROCERY', 'DINING', 'TRAVEL', 'SUBSCRIPTION', 'UTILITIES', 'RETAIL', 'FUEL', 'OTHER',
+]);
+
+export const barBreakdownPropsSchema = z.object({
+  title: z.string(),
+  unit: z.enum(['currency', 'count']),
+  bars: z
+    .array(
+      z.object({
+        label: z.string(),
+        /** Raw magnitude, bar geometry only. */
+        value: z.number(),
+        /** Preformatted display value, e.g. "$4,400.00". */
+        display: z.string(),
+        /** Preformatted context line, e.g. "Promo ends Sep 20, 2026 · 59 days". */
+        detail: z.string().optional(),
+        tone: toneSchema.default('neutral'),
+      }),
+    )
+    .min(1)
+    .max(12),
+  footnote: z.string().optional(),
+});
+export type BarBreakdownProps = z.infer<typeof barBreakdownPropsSchema>;
+
+export const categoryPiePropsSchema = z.object({
+  title: z.string(),
+  slices: z
+    .array(
+      z.object({
+        label: z.string(),
+        /** Raw magnitude, slice geometry only. */
+        value: z.number(),
+        display: z.string(),
+        /** Preformatted share, e.g. "34%". */
+        share: z.string(),
+      }),
+    )
+    .min(2)
+    .max(8),
+  /** Preformatted total callout, e.g. { label: "Total spend · trailing 3 mo", value: "$41,935.00" }. */
+  total: z.object({ label: z.string(), value: z.string() }).optional(),
+});
+export type CategoryPieProps = z.infer<typeof categoryPiePropsSchema>;
+
+export const transactionTablePropsSchema = z.object({
+  title: z.string(),
+  rows: z
+    .array(
+      z.object({
+        /** Preformatted display date, e.g. "Jul 12, 2026". */
+        postedDate: z.string(),
+        merchantName: z.string(),
+        category: transactionCategorySchema,
+        /** Preformatted amount, e.g. "$482.19". */
+        amount: z.string(),
+        /** Portfolio-wide tables attribute the account, e.g. "Alicia Thompson · bg-002". */
+        accountLabel: z.string().optional(),
+      }),
+    )
+    .min(1)
+    .max(25),
+  footnote: z.string().optional(),
+});
+export type TransactionTableProps = z.infer<typeof transactionTablePropsSchema>;
+
 /**
  * A render instruction — the `{ component, props }` payload of the wire
  * contract (§5b). Produced only by server-side tool execution; consumed only
@@ -208,6 +275,12 @@ export const renderInstructionSchema = z.discriminatedUnion('component', [
     props: outreachDraftCardPropsSchema,
   }),
   z.object({ component: z.literal('ApprovalCard'), props: approvalCardPropsSchema }),
+  z.object({ component: z.literal('BarBreakdown'), props: barBreakdownPropsSchema }),
+  z.object({ component: z.literal('CategoryPie'), props: categoryPiePropsSchema }),
+  z.object({
+    component: z.literal('TransactionTable'),
+    props: transactionTablePropsSchema,
+  }),
 ]);
 export type RenderInstruction = z.infer<typeof renderInstructionSchema>;
 export type RegistryComponentName = RenderInstruction['component'];

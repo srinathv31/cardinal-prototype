@@ -15,3 +15,9 @@ export {
   projectInterest,
   type ProjectionRow,
 } from './seed/finance';
+
+// The demo anchor ("today", honoring DEMO_ANCHOR_DATE) — the same T every
+// seed offset was generated from. Re-exported so consumers that compare
+// against "today" (dashboard KPIs, resolvers) share the seed's clock instead
+// of re-deriving it and drifting under a pinned rehearsal date.
+export { getAnchor } from './seed/anchor';
