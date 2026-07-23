@@ -158,6 +158,7 @@ function wrapStreamWithFallback(options: {
     async start(controller) {
       const reader = source.getReader();
       let forwardedAny = false;
+      let forwardedToolCall = false;
       let openTextId: string | undefined;
 
       try {
@@ -174,9 +175,22 @@ function wrapStreamWithFallback(options: {
               if (openTextId) {
                 controller.enqueue({ type: 'text-end', id: openTextId });
               }
-              const fallbackStream = await getFallbackStream();
-              for (const part of await toolCallsAndFinishFrom(fallbackStream)) {
-                controller.enqueue(part);
+              if (forwardedToolCall) {
+                // A real tool call already went out — splicing the scripted
+                // step's tool calls on top would duplicate evidence on
+                // screen. Close the step instead: the forwarded call
+                // executes, and the NEXT model call falls back with the
+                // script deriving its step from the updated history.
+                controller.enqueue({
+                  type: 'finish',
+                  usage: FALLBACK_USAGE,
+                  finishReason: { unified: 'tool-calls', raw: undefined },
+                });
+              } else {
+                const fallbackStream = await getFallbackStream();
+                for (const part of await toolCallsAndFinishFrom(fallbackStream)) {
+                  controller.enqueue(part);
+                }
               }
             }
             controller.close();
@@ -191,6 +205,7 @@ function wrapStreamWithFallback(options: {
           const chunk = outcome.value;
           if (chunk.type === 'text-start') openTextId = chunk.id;
           if (chunk.type === 'text-end') openTextId = undefined;
+          if (chunk.type === 'tool-call') forwardedToolCall = true;
           forwardedAny = true;
           controller.enqueue(chunk);
           if (chunk.type === 'finish') {

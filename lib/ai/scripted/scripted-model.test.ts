@@ -350,4 +350,41 @@ describe('fallback-model', () => {
     // ...and the run terminates cleanly rather than hanging.
     expect(parts.at(-1)?.type).toBe('finish');
   });
+
+  it('doStream closes with a bare finish (no splice) when the real stream stalls after a tool call', async () => {
+    process.env.DEMO_LLM_TIMEOUT_MS = '30';
+    const primary = stubModel({
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'stream-start', warnings: [] });
+            controller.enqueue({ type: 'tool-call', toolCallId: 'real-1', toolName: 'renderEvidence', input: '{}' });
+            // Then stalls forever — no finish, no close.
+          },
+        }),
+      }),
+    });
+    let fallbackCalled = false;
+    const fallback = stubModel({
+      doStream: async () => {
+        fallbackCalled = true;
+        throw new Error('should not be called');
+      },
+    });
+
+    const { stream } = await createFallbackModel({ primary, fallback }).doStream(EMPTY_CALL_OPTIONS);
+    const parts = await collectStream(stream);
+
+    // The real tool call is kept — splicing the scripted step's tool calls
+    // on top of it would render duplicate evidence, so the fallback model
+    // must NOT be consulted for this call at all...
+    expect(parts.filter((p) => p.type === 'tool-call')).toHaveLength(1);
+    expect(fallbackCalled).toBe(false);
+    // ...and the step closes with finishReason "tool-calls" so the loop
+    // executes the forwarded call and re-consults the model (which then
+    // falls back cleanly, deriving its step from the updated history).
+    const finish = parts.at(-1);
+    expect(finish?.type).toBe('finish');
+    expect(finish?.type === 'finish' && finish.finishReason.unified).toBe('tool-calls');
+  });
 });
