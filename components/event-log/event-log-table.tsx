@@ -137,12 +137,13 @@ function EventLogRow({ entry }: { entry: EventLogEntry }) {
       </TableCell>
       <TableCell className="text-sm">{formatStep(entry.step)}</TableCell>
       <TableCell className="font-mono text-sm">{entry.toolName || '—'}</TableCell>
-      <TableCell
-        className="max-w-xs text-sm whitespace-normal"
-        title={summary === '—' ? undefined : summary}
-      >
-        {truncate(summary, 140)}
-      </TableCell>
+      {/* Projector pass (brief §7/§8 "no critical info behind hover only"):
+          render the full inputSummary/outputSummary text — server already
+          bounds each field to ~110-140 chars (lib/events/telemetry.ts), so
+          this wraps to at most a couple of lines rather than growing
+          unbounded. A hard client-side truncate()+title used to hide the
+          back half of longer entries behind hover; that's gone. */}
+      <TableCell className="max-w-md text-sm whitespace-normal">{summary}</TableCell>
       <TableCell>
         <ActorBadge actor={entry.actor} />
       </TableCell>

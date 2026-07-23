@@ -36,7 +36,7 @@ export function RecentApprovals({ approvals }: { approvals: ApprovalEntryView[] 
                 </span>
                 <span
                   className={cn(
-                    "rounded-full px-2 py-0.5 text-xs font-semibold",
+                    "rounded-full px-2 py-0.5 text-sm font-semibold",
                     approval.decision === "granted"
                       ? "bg-success/15 text-success"
                       : "bg-destructive/15 text-destructive",
@@ -45,8 +45,8 @@ export function RecentApprovals({ approvals }: { approvals: ApprovalEntryView[] 
                   {approval.decision === "granted" ? "Approved" : "Denied"}
                 </span>
               </div>
-              <span className="font-mono text-xs text-muted-foreground">{approval.toolName}</span>
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span className="font-mono text-sm text-muted-foreground">{approval.toolName}</span>
+              <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
                 <span>{approval.timeLabel}</span>
                 <span className="rounded-full bg-muted px-2 py-0.5">actor: human</span>
               </div>

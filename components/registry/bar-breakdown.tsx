@@ -51,14 +51,14 @@ export function BarBreakdown({ title, bars, footnote }: BarBreakdownProps) {
                 />
               </div>
               {bar.detail ? (
-                <span className="text-xs text-muted-foreground">{bar.detail}</span>
+                <span className="text-sm text-muted-foreground">{bar.detail}</span>
               ) : null}
             </div>
           );
         })}
       </div>
       {footnote ? (
-        <p className="mt-4 text-xs text-muted-foreground">{footnote}</p>
+        <p className="mt-4 text-sm text-muted-foreground">{footnote}</p>
       ) : null}
     </div>
   );

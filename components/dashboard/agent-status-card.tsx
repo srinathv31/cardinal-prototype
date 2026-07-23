@@ -26,7 +26,7 @@ export function AgentStatusCard({
           overflow into the neighboring card (projector rule, brief §7). */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-lg font-semibold text-foreground">{name}</span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success/15 px-2.5 py-1 text-xs font-semibold text-success">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success/15 px-2.5 py-1 text-sm font-semibold text-success">
           <span className="relative flex size-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
             <span className="relative inline-flex size-2 rounded-full bg-success" />

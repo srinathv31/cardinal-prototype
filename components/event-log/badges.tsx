@@ -14,7 +14,7 @@ export function KindBadge({ kind }: { kind: EventLogEntry['kind'] }) {
   return (
     <span
       className={cn(
-        'inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap',
+        'inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-sm font-semibold whitespace-nowrap',
         TONE_CLASSES[kindTone(kind)],
       )}
     >
@@ -28,7 +28,7 @@ export function ActorBadge({ actor }: { actor: EventLogEntry['actor'] }) {
   return (
     <span
       className={cn(
-        'inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold capitalize',
+        'inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-sm font-semibold capitalize',
         TONE_CLASSES[actorTone(actor)],
       )}
     >

@@ -30,10 +30,10 @@ export function ApprovalCard({
   return (
     <div className="rounded-xl border-2 border-primary/40 bg-card p-5 ring-1 ring-foreground/5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <span className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
           Approval requested
         </span>
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-sm text-muted-foreground">
           {toolName}
         </span>
       </div>
@@ -50,7 +50,7 @@ export function ApprovalCard({
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="text-sm text-muted-foreground">Evidence</span>
           {evidence.map((label, index) => (
-            <Badge key={`${label}-${index}`} variant="outline">
+            <Badge key={`${label}-${index}`} variant="outline" className="h-6 text-sm">
               {label}
             </Badge>
           ))}

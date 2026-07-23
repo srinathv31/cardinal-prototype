@@ -82,13 +82,13 @@ export function EventTicker({ events }: { events: TickerEvent[] }) {
           <div className="flex items-center justify-between gap-2">
             <span
               className={cn(
-                "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
+                "inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-semibold",
                 KIND_TONE[event.kind] ?? "bg-muted text-muted-foreground",
               )}
             >
               {KIND_LABEL[event.kind] ?? event.kind}
             </span>
-            <span className="font-mono text-xs text-muted-foreground">{event.timeLabel}</span>
+            <span className="font-mono text-sm text-muted-foreground">{event.timeLabel}</span>
           </div>
           <p className="text-base text-foreground">{event.summary}</p>
         </li>

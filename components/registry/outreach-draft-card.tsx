@@ -27,7 +27,7 @@ export function OutreachDraftCard({
     <div className="overflow-hidden rounded-xl border border-border bg-card ring-1 ring-foreground/5">
       <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-3">
         <Mail className="size-4 text-primary" />
-        <span className="inline-flex items-center rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-semibold tracking-wide text-primary uppercase">
+        <span className="inline-flex items-center rounded-full bg-primary/15 px-2.5 py-0.5 text-sm font-semibold tracking-wide text-primary uppercase">
           {channelLabel[channel]}
         </span>
         <span className="text-sm text-muted-foreground">Outreach draft</span>

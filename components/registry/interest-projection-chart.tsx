@@ -110,7 +110,11 @@ export function InterestProjectionChart({
 
       <ChartContainer config={CHART_CONFIG} className="aspect-auto h-64 w-full">
         <ComposedChart data={data} margin={{ left: 4, right: 16, top: 8, bottom: 4 }}>
-          <CartesianGrid vertical={false} strokeOpacity={0.4} />
+          {/* Projector pass: see trend-chart.tsx's comment — an explicit
+              stroke bypasses chart.tsx's #ccc-only CSS dimming so the grid
+              renders at --border's own ~3:1 against the card instead of
+              ~1.4:1. */}
+          <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis
             dataKey="label"
             tickLine={false}

@@ -74,8 +74,12 @@
   --accent: oklch(0.24 0.02 230);
   --accent-foreground: oklch(0.97 0.005 250);
   --destructive: oklch(0.66 0.2 25);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
+  /* Projector pass: 12%/16% measured at ~3.1-4.0:1 against card/background
+     (WCAG non-text 1.4.11 floor is 3:1) — too close to the line for a room
+     with ambient light washing the projector's blacks. Brightened to a
+     comfortable 4.2-5.3:1 while staying a faint hairline, not a hard rule. */
+  --border: oklch(1 0 0 / 18%);
+  --input: oklch(1 0 0 / 24%);
   --ring: oklch(0.72 0.1 195);
   --chart-1: oklch(0.75 0.12 195);
   --chart-2: oklch(0.72 0.15 290);
@@ -91,7 +95,7 @@
   --sidebar-primary-foreground: oklch(0.15 0.02 230);
   --sidebar-accent: oklch(0.22 0.02 230);
   --sidebar-accent-foreground: oklch(0.96 0.005 250);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 16%);
   --sidebar-ring: oklch(0.72 0.1 195);
 }
 

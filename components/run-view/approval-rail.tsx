@@ -176,7 +176,7 @@ function ConfirmationRow({ title, confirmationId }: { title: string; confirmatio
     <div className="flex items-center gap-2.5 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
       <CheckCircle2 className="size-4 shrink-0" />
       <span className="font-medium">{title}</span>
-      <span className="font-mono text-xs text-success/80">{confirmationId}</span>
+      <span className="font-mono text-sm text-success">{confirmationId}</span>
     </div>
   );
 }
@@ -214,7 +214,7 @@ function KindChip({ entry }: { entry: EventLogEntry }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-sm font-medium",
         KIND_STYLES[entry.kind],
       )}
     >
@@ -272,7 +272,7 @@ function AuditTrail({
           {entries.map((entry) => (
             <li
               key={entry.id}
-              className="animate-in fade-in slide-in-from-right-2 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/60 px-3 py-2 text-xs"
+              className="animate-in fade-in slide-in-from-right-2 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/60 px-3 py-2 text-sm"
             >
               <KindChip entry={entry} />
               {entry.toolName ? (

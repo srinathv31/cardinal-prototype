@@ -46,7 +46,9 @@ export function TransactionTable({ title, rows, footnote }: TransactionTableProp
               <TableCell className="font-medium">{row.postedDate}</TableCell>
               <TableCell>{row.merchantName}</TableCell>
               <TableCell>
-                <Badge variant="outline">{CATEGORY_LABEL[row.category]}</Badge>
+                <Badge variant="outline" className="h-6 text-sm">
+                  {CATEGORY_LABEL[row.category]}
+                </Badge>
               </TableCell>
               {showAccountColumn ? (
                 <TableCell className="text-muted-foreground">
@@ -59,7 +61,7 @@ export function TransactionTable({ title, rows, footnote }: TransactionTableProp
         </TableBody>
       </Table>
       {footnote ? (
-        <p className="mt-3 text-xs text-muted-foreground">{footnote}</p>
+        <p className="mt-3 text-sm text-muted-foreground">{footnote}</p>
       ) : null}
     </div>
   );

@@ -111,7 +111,7 @@ function RunViewInstance({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/60 px-5 py-4 ring-1 ring-foreground/5">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-base font-semibold text-foreground">{agentName}</span>
-          <span className="font-mono text-xs text-muted-foreground" title={runId}>
+          <span className="font-mono text-sm text-muted-foreground" title={runId}>
             {runId.length > 18 ? `${runId.slice(0, 18)}…` : runId}
           </span>
           <StatusChip status={runStatus} />
@@ -197,7 +197,7 @@ function TriggerCard({
   return (
     <div className="rounded-xl border border-border bg-card p-6 ring-1 ring-foreground/5">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="font-mono text-xs tracking-wide uppercase">
+        <Badge variant="outline" className="h-6 font-mono text-sm tracking-wide uppercase">
           {trigger.kind}
         </Badge>
         <span className="text-sm text-muted-foreground">{formatDateTime(trigger.timestamp)}</span>

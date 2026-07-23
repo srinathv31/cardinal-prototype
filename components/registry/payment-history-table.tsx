@@ -74,7 +74,7 @@ export function PaymentHistoryTable({ title, rows }: PaymentHistoryTableProps) {
                   {row.amountPaid}
                 </TableCell>
                 <TableCell>
-                  <Badge variant="outline" className={badge.className}>
+                  <Badge variant="outline" className={cn(badge.className, "h-6 text-sm")}>
                     {badge.label}
                   </Badge>
                 </TableCell>

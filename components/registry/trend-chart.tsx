@@ -114,7 +114,14 @@ export function TrendChart({ title, unit, series }: TrendChartProps) {
       </div>
       <ChartContainer config={config} className="aspect-auto h-64 w-full">
         <LineChart data={data} margin={{ left: 4, right: 16, top: 8, bottom: 4 }}>
-          <CartesianGrid vertical={false} strokeOpacity={0.4} />
+          {/* Projector pass: chart.tsx's shared CSS only recolors recharts'
+              default `stroke="#ccc"` grid lines, then dims them further
+              (stroke-border/50); stacked with the old strokeOpacity={0.4}
+              prop here that came out under 1.5:1 against the card — nearly
+              invisible. An explicit stroke bypasses that CSS match entirely
+              (the attribute is no longer "#ccc"), landing at --border's own
+              ~3:1 against the card, matching every other border in the app. */}
+          <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis
             dataKey="label"
             tickLine={false}

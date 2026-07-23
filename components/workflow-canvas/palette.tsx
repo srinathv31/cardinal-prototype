@@ -49,7 +49,7 @@ export function Palette() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-foreground">{entry.label}</p>
                   <span
-                    className={`text-xs font-medium ${CATEGORY_LABEL_STYLES[entry.category]}`}
+                    className={`text-sm font-medium ${CATEGORY_LABEL_STYLES[entry.category]}`}
                   >
                     {entry.category}
                   </span>

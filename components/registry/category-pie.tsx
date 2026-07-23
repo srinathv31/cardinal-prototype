@@ -93,7 +93,7 @@ export function CategoryPie({ title, slices, total }: CategoryPieProps) {
           {total ? (
             <div className="pointer-events-none absolute inset-0 grid place-items-center">
               <div className="flex flex-col items-center gap-0.5 text-center">
-                <span className="max-w-32 text-xs text-muted-foreground">{total.label}</span>
+                <span className="max-w-32 text-sm text-muted-foreground">{total.label}</span>
                 <span className="font-mono text-lg font-semibold tabular-nums text-foreground">
                   {total.value}
                 </span>

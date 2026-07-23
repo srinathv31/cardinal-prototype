@@ -44,7 +44,7 @@ export function CardinalNode({ data, selected }: NodeProps<CardinalNodeType>) {
         <p className="truncate text-sm font-semibold text-foreground">{entry.label}</p>
         <span
           className={cn(
-            "mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+            "mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-sm font-medium",
             CATEGORY_CHIP_STYLES[entry.category],
           )}
         >

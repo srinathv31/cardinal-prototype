@@ -52,7 +52,7 @@ function PartyCard({ party }: { party: PartyNode }) {
         </span>
         <span
           className={cn(
-            "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium",
+            "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-sm font-medium",
             party.role === "PRIMARY"
               ? "bg-accent text-accent-foreground"
               : "bg-muted text-muted-foreground",
@@ -61,7 +61,7 @@ function PartyCard({ party }: { party: PartyNode }) {
           {ROLE_LABEL[party.role]}
         </span>
         {party.highlight ? (
-          <span className="inline-flex shrink-0 items-center rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
+          <span className="inline-flex shrink-0 items-center rounded-full bg-primary/15 px-2 py-0.5 text-sm font-semibold text-primary">
             Graduation candidate
           </span>
         ) : null}
