@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     // Vendored registry code (shadcn + AI Elements) — typechecked, not linted.
     "components/ui/**",
     "components/ai-elements/**",
+    // Claude Code session artifacts (nested git worktrees) — not project code.
+    ".claude/**",
   ]),
 ]);
 
