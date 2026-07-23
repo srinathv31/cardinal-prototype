@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { ResetControl } from "./reset-control";
 
 const links = [
   { href: "/", label: "Command Center", icon: LayoutDashboard },
@@ -55,10 +56,11 @@ export function ShellNav() {
           );
         })}
       </nav>
-      <div className="border-t border-sidebar-border px-5 py-4">
+      <div className="flex items-center justify-between gap-2 border-t border-sidebar-border px-5 py-4">
         <span className="text-xs text-muted-foreground">
           Prototype · agents act, humans approve
         </span>
+        <ResetControl />
       </div>
     </aside>
   );
