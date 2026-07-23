@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { StreamEvent } from "@/lib/soe";
-import type { PaymentHealthUIMessage } from "@/lib/agents/payment-health/agent";
+import type { CardinalUIMessage } from "@/lib/agents/registry";
 import { NarrationPane } from "./narration-pane";
 import { EvidencePane } from "./evidence-pane";
 import { ApprovalRail } from "./approval-rail";
@@ -58,12 +58,12 @@ function RunViewInstance({
 }) {
   const [runId] = useState(() => `run-${crypto.randomUUID()}`);
   const transport = useMemo(
-    () => new DefaultChatTransport<PaymentHealthUIMessage>({ api: `/api/agents/${agentId}/stream` }),
+    () => new DefaultChatTransport<CardinalUIMessage>({ api: `/api/agents/${agentId}/stream` }),
     [agentId],
   );
 
   const { messages, sendMessage, addToolApprovalResponse, status, error } =
-    useChat<PaymentHealthUIMessage>({
+    useChat<CardinalUIMessage>({
       id: runId,
       transport,
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,

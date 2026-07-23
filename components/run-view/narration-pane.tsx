@@ -14,13 +14,16 @@ import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-e
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import type { PaymentHealthUIMessage } from "@/lib/agents/payment-health/agent";
+import type { CardinalUIMessage } from "@/lib/agents/registry";
 import {
   type AssistantPart,
   type StepTone,
+  getActionCopy,
   humanizeComponentName,
+  isActionToolPart,
   readComponentName,
   toneFromToolState,
+  toolNameFromPartType,
 } from "./utils";
 
 /** Best-effort extraction of a human-readable message from the Error thrown
@@ -43,7 +46,7 @@ export function NarrationPane({
   error,
   onNewRun,
 }: {
-  messages: PaymentHealthUIMessage[];
+  messages: CardinalUIMessage[];
   status: ChatStatus;
   error: Error | undefined;
   onNewRun: () => void;
@@ -124,11 +127,16 @@ function NarrationPart({ part }: { part: AssistantPart }) {
             : `Rendering evidence — ${name}`;
       return <StepChip label={label} tone={tone} />;
     }
-    case "tool-proposeDueDateChange":
-      return <StepChip label={actionStepLabel("Due-date change", "Proposing due-date change…", part.state)} tone={toneFromToolState(part.state)} />;
-    case "tool-sendOutreachDraft":
-      return <StepChip label={actionStepLabel("Outreach draft", "Drafting outreach email…", part.state)} tone={toneFromToolState(part.state)} />;
     default:
+      if (isActionToolPart(part)) {
+        const copy = getActionCopy(toolNameFromPartType(part.type));
+        return (
+          <StepChip
+            label={actionStepLabel(copy.noun, copy.pending, part.state)}
+            tone={toneFromToolState(part.state)}
+          />
+        );
+      }
       return null;
   }
 }

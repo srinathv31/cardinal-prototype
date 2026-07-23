@@ -4,35 +4,29 @@
 // one card per action-tool part, mapped mechanically off `part.state`
 // (docs/wire-contract.md §4), plus an audit-trail feed polling the same
 // run's Event Log entries (§5). No business logic: copy is a static map
-// keyed by tool name, decisions/labels are read straight off wire state.
+// keyed by tool name (utils.ts's ACTION_COPY), decisions/labels are read
+// straight off wire state. One generic proposal component handles every
+// agent's action tools — new tools need only a copy-map entry.
 
 import { useEffect, useState } from "react";
 import type { ChatAddToolApproveResponseFunction, ChatStatus } from "ai";
 import { Bot, CheckCircle2, User } from "lucide-react";
 import { ApprovalCard, OutreachDraftCard } from "@/components/registry";
 import { cn } from "@/lib/utils";
-import type { PaymentHealthUIMessage } from "@/lib/agents/payment-health/agent";
+import type { CardinalUIMessage } from "@/lib/agents/registry";
 import type { EventLogEntry } from "@/lib/events/types";
 import {
   type ActionToolPart,
   evidenceLabelsSoFar,
   formatClockTime,
+  getActionCopy,
   hasPendingApproval,
   isActionToolPart,
+  readStringField,
+  toolNameFromPartType,
 } from "./utils";
 
-const APPROVAL_COPY = {
-  proposeDueDateChange: {
-    title: "Align payment due date",
-    description: "Move this account's payment due date so autopay lands after payday.",
-  },
-  sendOutreachDraft: {
-    title: "Send payment support outreach",
-    description: "Email the cardholder to offer help before the next statement.",
-  },
-} as const;
-
-function collectActionParts(messages: PaymentHealthUIMessage[]): ActionToolPart[] {
+function collectActionParts(messages: CardinalUIMessage[]): ActionToolPart[] {
   const parts: ActionToolPart[] = [];
   for (const message of messages) {
     if (message.role !== "assistant") continue;
@@ -50,7 +44,7 @@ export function ApprovalRail({
   addToolApprovalResponse,
 }: {
   runId: string;
-  messages: PaymentHealthUIMessage[];
+  messages: CardinalUIMessage[];
   status: ChatStatus;
   addToolApprovalResponse: ChatAddToolApproveResponseFunction;
 }) {
@@ -72,23 +66,14 @@ export function ApprovalRail({
             Proposed actions appear here once the agent finishes investigating.
           </p>
         ) : (
-          actionParts.map((part) =>
-            part.type === "tool-sendOutreachDraft" ? (
-              <SendOutreachDraftAction
-                key={part.toolCallId}
-                part={part}
-                evidenceLabels={evidenceLabels}
-                onDecision={handleDecision}
-              />
-            ) : (
-              <ProposeDueDateChangeAction
-                key={part.toolCallId}
-                part={part}
-                evidenceLabels={evidenceLabels}
-                onDecision={handleDecision}
-              />
-            ),
-          )
+          actionParts.map((part) => (
+            <ActionToolProposal
+              key={part.toolCallId}
+              part={part}
+              evidenceLabels={evidenceLabels}
+              onDecision={handleDecision}
+            />
+          ))
         )}
       </section>
 
@@ -97,110 +82,62 @@ export function ApprovalRail({
   );
 }
 
-type ProposeDueDateChangePart = Extract<
-  PaymentHealthUIMessage["parts"][number],
-  { type: "tool-proposeDueDateChange" }
->;
-type SendOutreachDraftPart = Extract<
-  PaymentHealthUIMessage["parts"][number],
-  { type: "tool-sendOutreachDraft" }
->;
-
-function ProposeDueDateChangeAction({
+/** Generic action-tool proposal, driven entirely by wire state (part.type ->
+ * tool name -> static copy) and the §2 state machine. Covers every agent's
+ * action tools with zero per-tool components (wire-contract §2, §4). */
+function ActionToolProposal({
   part,
   evidenceLabels,
   onDecision,
 }: {
-  part: ProposeDueDateChangePart;
+  part: ActionToolPart;
   evidenceLabels: string[];
   onDecision: (approvalId: string, approved: boolean) => void;
 }) {
-  const copy = APPROVAL_COPY.proposeDueDateChange;
+  const toolName = toolNameFromPartType(part.type);
+  const copy = getActionCopy(toolName);
 
   switch (part.state) {
     case "input-streaming":
     case "input-available":
-      return <PendingActionRow label={copy.title} />;
-    case "approval-requested":
-      return (
-        <ApprovalCard
-          approvalId={part.approval.id}
-          toolName="proposeDueDateChange"
-          title={copy.title}
-          description={copy.description}
-          rationale={part.input.rationale}
-          evidence={evidenceLabels}
-          onApprove={() => onDecision(part.approval.id, true)}
-          onDecline={() => onDecision(part.approval.id, false)}
-        />
-      );
-    case "approval-responded":
-      return (
-        <ApprovalCard
-          approvalId={part.approval.id}
-          toolName="proposeDueDateChange"
-          title={copy.title}
-          description={copy.description}
-          rationale={part.input.rationale}
-          evidence={evidenceLabels}
-          onApprove={() => {}}
-          onDecline={() => {}}
-          disabled
-          decision={part.approval.approved ? "approved" : "denied"}
-        />
-      );
-    case "output-available":
-      return <ConfirmationRow title={copy.title} confirmationId={part.output.confirmationId} />;
-    case "output-denied":
-      return <DeclinedRow title={copy.title} />;
-    case "output-error":
-      return <FailedRow title={copy.title} errorText={part.errorText} />;
-    default:
-      return null;
-  }
-}
-
-function SendOutreachDraftAction({
-  part,
-  evidenceLabels,
-  onDecision,
-}: {
-  part: SendOutreachDraftPart;
-  evidenceLabels: string[];
-  onDecision: (approvalId: string, approved: boolean) => void;
-}) {
-  const copy = APPROVAL_COPY.sendOutreachDraft;
-
-  switch (part.state) {
-    case "input-streaming":
-    case "input-available":
-      return <PendingActionRow label={copy.title} />;
-    case "approval-requested":
+      return <PendingActionRow label={copy.pending} />;
+    case "approval-requested": {
+      const subject = readStringField(part.input, "subject");
+      const body = readStringField(part.input, "body");
+      const rationale = readStringField(part.input, "rationale");
       return (
         <div className="flex flex-col gap-3">
-          <OutreachDraftCard channel="EMAIL" to="—" subject={part.input.subject} body={part.input.body} />
+          {subject && body ? (
+            <OutreachDraftCard channel="EMAIL" to="—" subject={subject} body={body} />
+          ) : null}
           <ApprovalCard
             approvalId={part.approval.id}
-            toolName="sendOutreachDraft"
+            toolName={toolName}
             title={copy.title}
             description={copy.description}
-            rationale={part.input.rationale}
+            rationale={rationale}
             evidence={evidenceLabels}
             onApprove={() => onDecision(part.approval.id, true)}
             onDecline={() => onDecision(part.approval.id, false)}
           />
         </div>
       );
-    case "approval-responded":
+    }
+    case "approval-responded": {
+      const subject = readStringField(part.input, "subject");
+      const body = readStringField(part.input, "body");
+      const rationale = readStringField(part.input, "rationale");
       return (
         <div className="flex flex-col gap-3">
-          <OutreachDraftCard channel="EMAIL" to="—" subject={part.input.subject} body={part.input.body} />
+          {subject && body ? (
+            <OutreachDraftCard channel="EMAIL" to="—" subject={subject} body={body} />
+          ) : null}
           <ApprovalCard
             approvalId={part.approval.id}
-            toolName="sendOutreachDraft"
+            toolName={toolName}
             title={copy.title}
             description={copy.description}
-            rationale={part.input.rationale}
+            rationale={rationale}
             evidence={evidenceLabels}
             onApprove={() => {}}
             onDecline={() => {}}
@@ -209,8 +146,14 @@ function SendOutreachDraftAction({
           />
         </div>
       );
+    }
     case "output-available":
-      return <ConfirmationRow title={copy.title} confirmationId={part.output.confirmationId} />;
+      return (
+        <ConfirmationRow
+          title={copy.title}
+          confirmationId={readStringField(part.output, "confirmationId") ?? ""}
+        />
+      );
     case "output-denied":
       return <DeclinedRow title={copy.title} />;
     case "output-error":
@@ -223,7 +166,7 @@ function SendOutreachDraftAction({
 function PendingActionRow({ label }: { label: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-3.5 text-sm text-muted-foreground">
-      Preparing proposal — {label.toLowerCase()}…
+      {label}
     </div>
   );
 }

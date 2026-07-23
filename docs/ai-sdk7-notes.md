@@ -58,6 +58,13 @@ listed here before using it. Do not use v5/v6 patterns (`maxSteps`,
 
 ## Misc gotchas
 
+- Multi-agent routes can't be typed over a union: `createAgentUIStreamResponse`
+  needs `agent` and `uiMessages` generics to be the SAME agent's types, and a
+  union of `ToolLoopAgent`s isn't assignable (tool sets differ). Dispatch one
+  fully-narrow branch per agentId instead of a factory-map lookup —
+  lib/agents/registry.ts's `createAgentRunStreamResponse` is the pattern.
+  Client code CAN use the union (`useChat<CardinalUIMessage>` works fine).
+
 - Vendored AI Elements (components/ai-elements) predates naming in current
   docs: narration markdown is `MessageResponse` in `message.tsx` (no
   `response.tsx`), and there is no `loader.tsx` — use

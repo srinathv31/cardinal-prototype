@@ -12,12 +12,12 @@ import { Component, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 import { EvidenceRenderer } from "@/components/registry";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { PaymentHealthUIMessage } from "@/lib/agents/payment-health/agent";
+import type { CardinalUIMessage } from "@/lib/agents/registry";
 import { humanizeComponentName, readComponentName } from "./utils";
 
-type EvidencePart = Extract<PaymentHealthUIMessage["parts"][number], { type: "tool-renderEvidence" }>;
+type EvidencePart = Extract<CardinalUIMessage["parts"][number], { type: "tool-renderEvidence" }>;
 
-function collectEvidenceParts(messages: PaymentHealthUIMessage[]): EvidencePart[] {
+function collectEvidenceParts(messages: CardinalUIMessage[]): EvidencePart[] {
   const parts: EvidencePart[] = [];
   for (const message of messages) {
     if (message.role !== "assistant") continue;
@@ -28,7 +28,7 @@ function collectEvidenceParts(messages: PaymentHealthUIMessage[]): EvidencePart[
   return parts;
 }
 
-export function EvidencePane({ messages }: { messages: PaymentHealthUIMessage[] }) {
+export function EvidencePane({ messages }: { messages: CardinalUIMessage[] }) {
   const parts = collectEvidenceParts(messages);
 
   if (parts.length === 0) {
@@ -71,10 +71,10 @@ function EvidenceCard({ part }: { part: EvidencePart }) {
   }
 
   // input-streaming | input-available | approval-requested | approval-responded
-  // (renderEvidence is read-only and never approval-gated per
-  // lib/agents/payment-health/agent.ts, but the wire type is shared across
-  // all tool parts, so these last two are handled defensively — never
-  // reached in practice.)
+  // (renderEvidence is read-only and never approval-gated in any agent's
+  // config — lib/agents/{payment-health,bt-lifecycle,au-growth}/agent.ts —
+  // but the wire type is shared across all tool parts, so these last two are
+  // handled defensively — never reached in practice.)
   const label = humanizeComponentName(readComponentName(part.input) ?? "evidence");
   return (
     <div className="space-y-3 rounded-xl border border-border bg-card/50 p-5 ring-1 ring-foreground/5">

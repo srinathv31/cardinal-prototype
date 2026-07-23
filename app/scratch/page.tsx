@@ -1,9 +1,10 @@
 "use client";
 
-// DEV-ONLY REGISTRY SHOWCASE (W1.2). Renders all six Payment-Health registry
-// components (brief §5c) from typed fixture RenderInstruction/props objects,
-// with Marcus-Webb-story-plausible values — this is how W1.2 gets visually
-// verified without an LLM key. Not part of the §4 screen inventory.
+// DEV-ONLY REGISTRY SHOWCASE (W1.2, extended W2.3 to cover the P2 set).
+// Renders every registry component (brief §5c) from typed fixture
+// RenderInstruction/props objects, with story-plausible values (Marcus Webb
+// for P1, Elena and the Patels for P2) — this is how the registry gets
+// visually verified without an LLM key. Not part of the §4 screen inventory.
 // Delete this page (or the P1 agent will replace it) before the demo ships;
 // it superseded the P0 lib/soe smoke-test that lived at this route.
 
@@ -126,6 +127,105 @@ const riskBadgeFixture: RenderInstruction = {
   },
 };
 
+const btTimelineFixture: RenderInstruction = {
+  component: "BTTimeline",
+  props: {
+    title: "Balance transfer lifecycle",
+    milestones: [
+      {
+        id: "initiated",
+        label: "Balance transfer initiated",
+        date: "Sep 11, 2025",
+        detail: "$8,400.00 at 0.00% promo APR",
+        kind: "past",
+      },
+      {
+        id: "completed",
+        label: "Transfer completed",
+        date: "Sep 18, 2025",
+        kind: "past",
+      },
+      {
+        id: "today",
+        label: "Today",
+        date: "Jul 23, 2026",
+        detail: "$5,100.00 remaining",
+        kind: "today",
+      },
+      {
+        id: "promo-end",
+        label: "Promo rate ends",
+        date: "Sep 6, 2026",
+        detail: "Go-to APR 24.99% begins",
+        kind: "cliff",
+      },
+    ],
+    countdown: "45 days until the promo rate ends",
+  },
+};
+
+const interestProjectionChartFixture: RenderInstruction = {
+  component: "InterestProjectionChart",
+  props: {
+    title: "Projected interest after promo ends",
+    assumption:
+      "If nothing changes: $5,100.00 revolves at 24.99% APR after the promo ends, with $330.00/mo payments continuing",
+    points: [
+      { label: "M1", monthlyInterest: 106.21, cumulativeInterest: 106.21 },
+      { label: "M2", monthlyInterest: 101.55, cumulativeInterest: 207.76 },
+      { label: "M3", monthlyInterest: 96.79, cumulativeInterest: 304.55 },
+      { label: "M4", monthlyInterest: 91.93, cumulativeInterest: 396.48 },
+      { label: "M5", monthlyInterest: 86.98, cumulativeInterest: 483.46 },
+      { label: "M6", monthlyInterest: 81.91, cumulativeInterest: 565.37 },
+      { label: "M7", monthlyInterest: 76.75, cumulativeInterest: 642.12 },
+      { label: "M8", monthlyInterest: 71.47, cumulativeInterest: 713.59 },
+      { label: "M9", monthlyInterest: 66.09, cumulativeInterest: 779.68 },
+      { label: "M10", monthlyInterest: 60.59, cumulativeInterest: 840.27 },
+      { label: "M11", monthlyInterest: 54.98, cumulativeInterest: 895.25 },
+      { label: "M12", monthlyInterest: 49.26, cumulativeInterest: 944.51 },
+    ],
+    callouts: [
+      { label: "First month interest", value: "$106.21" },
+      { label: "12-month total", value: "$944.51" },
+      { label: "Assumed payment", value: "$330.00/mo" },
+    ],
+  },
+};
+
+const partyGraphFixture: RenderInstruction = {
+  component: "PartyGraph",
+  props: {
+    title: "Household relationship map",
+    account: {
+      label: "Patel household card",
+      detail: "Open since Aug 2018 · $25,000.00 limit",
+    },
+    parties: [
+      {
+        id: "party-anand-patel",
+        name: "Anand Patel",
+        role: "PRIMARY",
+        detail: "Primary since Aug 2018",
+        highlight: false,
+      },
+      {
+        id: "party-priya-patel",
+        name: "Priya Patel",
+        role: "AUTHORIZED_USER",
+        detail: "Authorized user since Jun 2019 · Age 49",
+        highlight: false,
+      },
+      {
+        id: "party-dev-patel",
+        name: "Dev Patel",
+        role: "AUTHORIZED_USER",
+        detail: "Authorized user since Jul 2022 · Age 22",
+        highlight: true,
+      },
+    ],
+  },
+};
+
 // Malformed on purpose — simulates a wire payload outside the registry to
 // verify EvidenceRenderer's "never throw" guarantee (wire-contract §3,
 // brief §8). Cast is deliberate; real callers never get an invalid
@@ -181,7 +281,7 @@ export default function ScratchPage() {
     <div className="space-y-10 pb-16">
       <PageHeader
         title="Component Registry Showcase"
-        description="Dev-only fixture render of the W1.2 Payment Health registry set — deleted before the demo ships."
+        description="Dev-only fixture render of the full registry set (P1 Payment Health + P2 BT Lifecycle/AU Growth) — deleted before the demo ships."
       />
 
       <ShowcaseSection label="MetricRow" tool="renderEvidence → EvidenceRenderer">
@@ -201,6 +301,21 @@ export default function ScratchPage() {
 
       <ShowcaseSection label="RiskBadge" tool="renderEvidence → EvidenceRenderer">
         <EvidenceRenderer instruction={riskBadgeFixture} />
+      </ShowcaseSection>
+
+      <ShowcaseSection label="BTTimeline" tool="renderEvidence → EvidenceRenderer">
+        <EvidenceRenderer instruction={btTimelineFixture} />
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        label="InterestProjectionChart"
+        tool="renderEvidence → EvidenceRenderer"
+      >
+        <EvidenceRenderer instruction={interestProjectionChartFixture} />
+      </ShowcaseSection>
+
+      <ShowcaseSection label="PartyGraph" tool="renderEvidence → EvidenceRenderer">
+        <EvidenceRenderer instruction={partyGraphFixture} />
       </ShowcaseSection>
 
       <ShowcaseSection

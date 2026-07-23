@@ -5,6 +5,12 @@
 // the SOE adapter. Editorial fields (e.g. RiskBadge rationale) are the only
 // model-authored text that reaches a renderer, per §5a.
 //
+// The outer union discriminates on `component`; where one component serves
+// several stories (MetricRow, TrendChart), an inner union discriminates on
+// `source.kind`. Every agent shares this schema as its tool input; each
+// agent's resolver dispatch handles only the kinds it owns and throws on the
+// rest (the instructions pin which kinds each agent calls).
+//
 // OutreachDraftCard and ApprovalCard are absent by design: they render from
 // action-tool inputs and approval states, not from evidence specs. See
 // docs/wire-contract.md §3–4.
@@ -12,6 +18,8 @@
 import { z } from 'zod';
 
 const accountId = z.string().describe('SOE account id, e.g. "acct-marcus"');
+
+const partyId = z.string().describe('SOE party id, e.g. "party-dev"');
 
 const months = z
   .number()
@@ -21,21 +29,42 @@ const months = z
   .default(6)
   .describe('How many trailing months of data to include');
 
+const statementMonths = z
+  .number()
+  .int()
+  .min(2)
+  .max(12)
+  .default(12)
+  .describe('How many trailing statement months to include');
+
+const projectionMonths = z
+  .number()
+  .int()
+  .min(2)
+  .max(24)
+  .default(12)
+  .describe('How many months to project forward');
+
 export const evidenceSpecSchema = z.discriminatedUnion('component', [
   z.object({
     component: z.literal('MetricRow'),
-    source: z.object({
-      kind: z.literal('account-overview'),
-      accountId,
-    }),
+    source: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('account-overview'), accountId }),
+      z.object({ kind: z.literal('bt-overview'), accountId }),
+      z.object({ kind: z.literal('au-recurring-spend'), accountId, partyId }),
+    ]),
   }),
   z.object({
     component: z.literal('TrendChart'),
-    source: z.object({
-      kind: z.literal('utilization-trend'),
-      accountId,
-      months,
-    }),
+    source: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('utilization-trend'), accountId, months }),
+      z.object({
+        kind: z.literal('au-spend-trend'),
+        accountId,
+        partyId,
+        months: statementMonths,
+      }),
+    ]),
   }),
   z.object({
     component: z.literal('PaymentHistoryTable'),
@@ -56,6 +85,28 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
       .describe(
         'Plain-English rationale for the risk level, grounded ONLY in figures returned by prior tool calls. Servicing language only — never credit-decisioning terms.',
       ),
+  }),
+  z.object({
+    component: z.literal('BTTimeline'),
+    source: z.object({
+      kind: z.literal('bt-lifecycle'),
+      accountId,
+    }),
+  }),
+  z.object({
+    component: z.literal('InterestProjectionChart'),
+    source: z.object({
+      kind: z.literal('interest-projection'),
+      accountId,
+      months: projectionMonths,
+    }),
+  }),
+  z.object({
+    component: z.literal('PartyGraph'),
+    source: z.object({
+      kind: z.literal('household-overview'),
+      accountId,
+    }),
   }),
 ]);
 export type EvidenceSpec = z.infer<typeof evidenceSpecSchema>;

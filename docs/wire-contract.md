@@ -60,8 +60,15 @@ Parts the frontend must handle:
 | `reasoning` | Model reasoning (provider-dependent, may be absent) | Optional muted block in narration pane |
 | `step-start` | Loop step boundary | Visual separator (optional) |
 | `tool-renderEvidence` | Evidence routing call | §3 |
-| `tool-proposeDueDateChange` | Action proposal (approval-gated) | §4 |
-| `tool-sendOutreachDraft` | Action proposal (approval-gated) | §4 |
+| `tool-proposeDueDateChange` | Action proposal (approval-gated, payment-health) | §4 |
+| `tool-sendOutreachDraft` | Action proposal (approval-gated, payment-health) | §4 |
+| `tool-sendRetentionOutreach` | Action proposal (approval-gated, bt-lifecycle) | §4 |
+| `tool-sendGraduationInvite` | Action proposal (approval-gated, au-growth) | §4 |
+
+A frontend handles action-tool parts **generically**: any `tool-*` part other
+than `tool-renderEvidence` is an action proposal and renders off the §2 state
+machine plus a static copy map keyed by tool name (§4). New action tools are
+additive — an unknown tool name falls back to humanized copy, never a crash.
 
 ### Tool part state machine
 
@@ -126,8 +133,9 @@ Registry (P1 set ships now; rest land with their beats):
 | RiskBadge | `riskBadgePropsSchema` | P1 |
 | OutreachDraftCard | `outreachDraftCardPropsSchema` | P1 |
 | ApprovalCard | `approvalCardPropsSchema` | P1 |
-| BTTimeline · InterestProjectionChart | — | P2 (W2.1) |
-| PartyGraph | — | P2 (W2.2) |
+| BTTimeline | `btTimelinePropsSchema` | P2 (W2.1) |
+| InterestProjectionChart | `interestProjectionChartPropsSchema` | P2 (W2.1) |
+| PartyGraph | `partyGraphPropsSchema` | P2 (W2.2) |
 | BarBreakdown · CategoryPie · TransactionTable | — | P3 (W3.3) |
 
 Adding a component = props schema + renderer + one union member (§5c).
@@ -141,12 +149,14 @@ produced by `renderEvidence` — they render from action-tool parts (§4).
 
 Action tools (side effects) are marked `user-approval` in the agent's
 `toolApproval` config; read-only tools never are (§5d — itself a talking
-point). P1 action tools:
+point). Action tools by agent:
 
-| Tool | Input (model-authored fields are editorial) | Mock side effect on approval |
+| Tool (agent) | Input (model-authored fields are editorial) | Mock side effect on approval |
 |---|---|---|
-| `proposeDueDateChange` | `{ accountId, proposedDueDayOfMonth, rationale }` | Due-date change "executes"; output `{ status: 'executed', confirmationId, effective }` |
-| `sendOutreachDraft` | `{ accountId, subject, body, rationale }` | Outreach "sends"; output `{ status: 'sent', confirmationId, to }`. Recipient resolved server-side from party data — the model never supplies contact details. |
+| `proposeDueDateChange` (payment-health) | `{ accountId, proposedDueDayOfMonth, rationale }` | Due-date change "executes"; output `{ status: 'executed', confirmationId, effective }` |
+| `sendOutreachDraft` (payment-health) | `{ accountId, subject, body, rationale }` | Outreach "sends"; output `{ status: 'sent', channel, to, confirmationId }`. Recipient resolved server-side from party data — the model never supplies contact details. |
+| `sendRetentionOutreach` (bt-lifecycle) | `{ accountId, subject, body, rationale }` | Same shape as `sendOutreachDraft`; recipient is the account's primary party, resolved server-side. |
+| `sendGraduationInvite` (au-growth) | `{ accountId, recipientPartyId, subject, body, rationale }` | Invitation "sends"; output `{ status: 'sent', channel, to, confirmationId }`. `recipientPartyId` is a routing reference — the email is resolved server-side, and the server rejects any recipient who is not an authorized user on the account. |
 
 Frontend mapping (mechanical, no business logic):
 
@@ -208,7 +218,16 @@ in-memory (prototype); production swaps the sink, not the shape.
 ## 6. Run triggers
 
 A run starts from a `StreamEvent` (lib/soe/types.ts). The client sends it as
-the first user message, `text` = pretty-printed JSON of the event. P1 trigger:
+the first user message, `text` = pretty-printed JSON of the event. Triggers
+by agent:
+
+| Agent | Trigger `eventId` | `kind` |
+|---|---|---|
+| payment-health | `evt-marcus-autopay-failed` | `autopay.failed` |
+| bt-lifecycle | `evt-elena-promo-expiring` | `bt.promo_expiring` |
+| au-growth | `evt-patel-statement` | `statement.generated` |
+
+Example (payment-health):
 
 ```json
 {

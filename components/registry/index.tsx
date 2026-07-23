@@ -13,6 +13,9 @@ import { MetricRow } from "./metric-row";
 import { TrendChart } from "./trend-chart";
 import { PaymentHistoryTable } from "./payment-history-table";
 import { RiskBadge } from "./risk-badge";
+import { BTTimeline } from "./bt-timeline";
+import { InterestProjectionChart } from "./interest-projection-chart";
+import { PartyGraph } from "./party-graph";
 import { OutreachDraftCard } from "./outreach-draft-card";
 import { ApprovalCard } from "./approval-card";
 
@@ -21,6 +24,9 @@ export {
   TrendChart,
   PaymentHistoryTable,
   RiskBadge,
+  BTTimeline,
+  InterestProjectionChart,
+  PartyGraph,
   OutreachDraftCard,
   ApprovalCard,
 };
@@ -39,6 +45,12 @@ export function EvidenceRenderer({
       return <PaymentHistoryTable {...instruction.props} />;
     case "RiskBadge":
       return <RiskBadge {...instruction.props} />;
+    case "BTTimeline":
+      return <BTTimeline {...instruction.props} />;
+    case "InterestProjectionChart":
+      return <InterestProjectionChart {...instruction.props} />;
+    case "PartyGraph":
+      return <PartyGraph {...instruction.props} />;
     case "OutreachDraftCard":
     case "ApprovalCard":
       // Registry members, but not evidence — they render from action-tool

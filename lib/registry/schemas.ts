@@ -5,9 +5,10 @@
 // preformatted strings computed server-side; raw numbers appear only where a
 // chart needs geometry. See docs/wire-contract.md §3.
 //
-// P1 ships the Payment Health set. Remaining registry members (BarBreakdown,
-// CategoryPie, TransactionTable, BTTimeline, InterestProjectionChart,
-// PartyGraph) are added in P2/P3: schema here + renderer + one union member.
+// P1 shipped the Payment Health set; P2 adds BTTimeline,
+// InterestProjectionChart (W2.1) and PartyGraph (W2.2). Remaining members
+// (BarBreakdown, CategoryPie, TransactionTable) land in P3: schema here +
+// renderer + one union member.
 
 import { z } from 'zod';
 
@@ -88,6 +89,80 @@ export const riskBadgePropsSchema = z.object({
 });
 export type RiskBadgeProps = z.infer<typeof riskBadgePropsSchema>;
 
+export const btTimelinePropsSchema = z.object({
+  title: z.string(),
+  milestones: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        /** Preformatted display date, e.g. "Sep 11, 2025". */
+        date: z.string(),
+        /** Preformatted context line, e.g. "$8,400.00 at 0% promo APR". */
+        detail: z.string().optional(),
+        /** Visual treatment derived server-side from event dates. */
+        kind: z.enum(['past', 'today', 'cliff']),
+      }),
+    )
+    .min(2)
+    .max(6),
+  /** Preformatted emphasis line, e.g. "45 days until the promo rate ends". */
+  countdown: z.string().optional(),
+});
+export type BTTimelineProps = z.infer<typeof btTimelinePropsSchema>;
+
+export const interestProjectionChartPropsSchema = z.object({
+  title: z.string(),
+  /** Preformatted "if nothing changes" assumption caption. */
+  assumption: z.string(),
+  points: z
+    .array(
+      z.object({
+        /** Preformatted x label, e.g. "M1" … "M12". */
+        label: z.string(),
+        /** Dollars — raw numbers appear only for chart geometry. */
+        monthlyInterest: z.number(),
+        cumulativeInterest: z.number(),
+      }),
+    )
+    .min(2)
+    .max(24),
+  /** Preformatted stat callouts, e.g. { label: "First month", value: "$106.21" }. */
+  callouts: z
+    .array(z.object({ label: z.string(), value: z.string() }))
+    .max(3)
+    .default([]),
+});
+export type InterestProjectionChartProps = z.infer<
+  typeof interestProjectionChartPropsSchema
+>;
+
+export const partyGraphPropsSchema = z.object({
+  title: z.string(),
+  account: z.object({
+    label: z.string(),
+    /** Preformatted, e.g. "Open since Aug 2018 · $25,000.00 limit". */
+    detail: z.string().optional(),
+  }),
+  parties: z
+    .array(
+      z.object({
+        /** SOE party id — lets the model reference this party in later calls. */
+        id: z.string(),
+        name: z.string(),
+        role: z.enum(['PRIMARY', 'AUTHORIZED_USER']),
+        /** Preformatted, e.g. "Authorized user since Jul 2022 · Age 22". */
+        detail: z.string().optional(),
+        /** Derived server-side (spend-growth rule, lib/agents/au-growth) —
+         * never asserted by the model. */
+        highlight: z.boolean().default(false),
+      }),
+    )
+    .min(1)
+    .max(6),
+});
+export type PartyGraphProps = z.infer<typeof partyGraphPropsSchema>;
+
 export const outreachDraftCardPropsSchema = z.object({
   channel: z.literal('EMAIL'),
   /** Resolved from party data server-side; the model never invents contacts. */
@@ -122,6 +197,12 @@ export const renderInstructionSchema = z.discriminatedUnion('component', [
     props: paymentHistoryTablePropsSchema,
   }),
   z.object({ component: z.literal('RiskBadge'), props: riskBadgePropsSchema }),
+  z.object({ component: z.literal('BTTimeline'), props: btTimelinePropsSchema }),
+  z.object({
+    component: z.literal('InterestProjectionChart'),
+    props: interestProjectionChartPropsSchema,
+  }),
+  z.object({ component: z.literal('PartyGraph'), props: partyGraphPropsSchema }),
   z.object({
     component: z.literal('OutreachDraftCard'),
     props: outreachDraftCardPropsSchema,

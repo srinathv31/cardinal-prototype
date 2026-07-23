@@ -2,15 +2,17 @@
 // (docs/wire-contract.md §1). Next 16: `params` is a Promise (see
 // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/route.md).
 //
-// Only 'payment-health' is wired up in this phase (bt-lifecycle / au-growth
-// land in P2); any other agentId 404s.
+// All three agents route through here; the agentId → factory map lives in
+// lib/agents/registry.ts. Any other agentId 404s.
 
-import { createAgentUIStreamResponse, getToolName, isToolUIPart, validateUIMessages } from 'ai';
+import { getToolName, isToolUIPart } from 'ai';
 import { NextResponse } from 'next/server';
-import { createPaymentHealthAgent, type PaymentHealthUIMessage } from '@/lib/agents/payment-health/agent';
+import {
+  createAgentRunStreamResponse,
+  isCardinalAgentId,
+  type CardinalUIMessage,
+} from '@/lib/agents/registry';
 import { append, hasHumanDecision } from '@/lib/events/store';
-
-const KNOWN_AGENT_IDS = new Set(['payment-health']);
 
 /** Truncates a free-text approval reason for the audit log — never a full
  * payload dump (brief §5e). */
@@ -28,7 +30,7 @@ function truncate(value: string, maxLen = 140): string {
 function logHumanApprovalDecisions(
   runId: string,
   agentId: string,
-  messages: PaymentHealthUIMessage[],
+  messages: CardinalUIMessage[],
 ): void {
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
   if (!lastAssistant) return;
@@ -59,7 +61,7 @@ export async function POST(
   context: { params: Promise<{ agentId: string }> },
 ): Promise<Response> {
   const { agentId } = await context.params;
-  if (!KNOWN_AGENT_IDS.has(agentId)) {
+  if (!isCardinalAgentId(agentId)) {
     return NextResponse.json({ error: `Unknown agentId "${agentId}"` }, { status: 404 });
   }
 
@@ -70,14 +72,12 @@ export async function POST(
     }
     const runId = body.id;
 
-    const agent = createPaymentHealthAgent({ runId });
-    const uiMessages = await validateUIMessages<PaymentHealthUIMessage>({
+    return await createAgentRunStreamResponse({
+      agentId,
+      runId,
       messages: body.messages,
+      onValidated: (uiMessages) => logHumanApprovalDecisions(runId, agentId, uiMessages),
     });
-
-    logHumanApprovalDecisions(runId, agentId, uiMessages);
-
-    return await createAgentUIStreamResponse({ agent, uiMessages });
   } catch (error) {
     console.error(`[api/agents/${agentId}/stream]`, error);
     return NextResponse.json({ error: 'Agent run failed to start.' }, { status: 500 });

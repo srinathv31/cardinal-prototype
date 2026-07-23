@@ -232,20 +232,24 @@ async function resolvePaymentRisk(accountId: string, rationale: string): Promise
 }
 
 /** Dispatches an EvidenceSpec to its resolver. The only entry point
- * lib/agents/payment-health/tools.ts's `renderEvidence` tool calls. */
+ * lib/agents/payment-health/tools.ts's `renderEvidence` tool calls. The
+ * evidence union is shared across all agents (lib/registry/evidence.ts);
+ * this agent resolves only the Payment Health kinds and throws on the rest
+ * — the tool surfaces that as an output-error chip, never a crash. */
 export async function resolveEvidence(spec: EvidenceSpec): Promise<RenderInstruction> {
   switch (spec.component) {
     case 'MetricRow':
+      if (spec.source.kind !== 'account-overview') break;
       return resolveAccountOverview(spec.source.accountId);
     case 'TrendChart':
+      if (spec.source.kind !== 'utilization-trend') break;
       return resolveUtilizationTrend(spec.source.accountId, spec.source.months);
     case 'PaymentHistoryTable':
       return resolvePaymentHistory(spec.source.accountId, spec.source.months);
     case 'RiskBadge':
       return resolvePaymentRisk(spec.source.accountId, spec.rationale);
-    default: {
-      const exhaustive: never = spec;
-      throw new Error(`Unhandled evidence spec: ${JSON.stringify(exhaustive)}`);
-    }
   }
+  throw new Error(
+    `payment-health does not resolve "${spec.component}" evidence from source "${spec.source.kind}"`,
+  );
 }
