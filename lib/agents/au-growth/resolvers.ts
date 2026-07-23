@@ -8,7 +8,7 @@
 // (brief §9) — this file only supplies numbers, so that guardrail lives in
 // the agent's narration/outreach copy, not here.
 
-import { getAccount, getPartiesForAccount, getPayments, getTransactions } from '@/lib/soe';
+import { getAccount, getAnchor, getPartiesForAccount, getPayments, getTransactions } from '@/lib/soe';
 import type { Transaction } from '@/lib/soe';
 import type { EvidenceSpec } from '@/lib/registry/evidence';
 import {
@@ -97,7 +97,7 @@ const MS_PER_YEAR = 365.25 * 86_400_000;
 
 function ageFromDateOfBirth(dateOfBirth: string): number {
   const dobMs = new Date(`${dateOfBirth.slice(0, 10)}T00:00:00.000Z`).getTime();
-  return Math.floor((Date.now() - dobMs) / MS_PER_YEAR);
+  return Math.floor((getAnchor().getTime() - dobMs) / MS_PER_YEAR);
 }
 
 /**

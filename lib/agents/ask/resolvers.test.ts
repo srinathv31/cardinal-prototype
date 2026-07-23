@@ -1,16 +1,14 @@
 // Resolver invariants for the Ask evidence set (brief §3 Beat 5/§5a/§5b):
 // every number that reaches a component must be reconstructable from the SOE
 // adapter alone. Pinned at BOTH demo-date anchors (CARDINAL_BRIEF.md —
-// Aug 5 and Aug 19, 2026): Ask's resolvers lean on real-wall-clock relative
-// math (daysUntil, the trailing-months window — lib/agents/ask/resolvers.ts,
-// same convention as lib/agents/payment-health/resolvers.ts), which only
-// agrees with a pinned DEMO_ANCHOR_DATE when "now" is faked to match it — so
-// each anchor group fakes the system clock alongside the env var, unlike
+// Aug 5 and Aug 19, 2026): resolvers derive "today" from the adapter's
+// `getAnchor()` (lib/agents/format.ts, lib/agents/ask/resolvers.ts), so
+// pinning DEMO_ANCHOR_DATE alone is sufficient — no clock faking, unlike
 // lib/soe/seed/seed.test.ts's `describe.each`, which calls buildSeedDb(anchor)
-// directly and needs no clock fake.
+// directly and needs no clock fake either.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getPortfolioAccounts, getTransactions } from '@/lib/soe';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { getAnchor, getPortfolioAccounts, getTransactions } from '@/lib/soe';
 import { shiftDays } from '@/lib/agents/format';
 import { resolveEvidence } from './resolvers';
 
@@ -19,12 +17,9 @@ const ANCHORS = ['2026-08-05', '2026-08-19'] as const;
 describe.each(ANCHORS)('ask resolvers @ anchor %s', (anchorIso) => {
   beforeEach(() => {
     process.env.DEMO_ANCHOR_DATE = anchorIso;
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(`${anchorIso}T00:00:00.000Z`));
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     delete process.env.DEMO_ANCHOR_DATE;
   });
 
@@ -71,7 +66,7 @@ describe.each(ANCHORS)('ask resolvers @ anchor %s', (anchorIso) => {
       // Independently recompute the trailing-window PURCHASE sum using the
       // same shared date helper the resolver uses (lib/agents/format.ts),
       // mirroring how bt-lifecycle/resolvers.test.ts reuses projectInterest.
-      const from = shiftDays(new Date().toISOString().slice(0, 10), -months * 30);
+      const from = shiftDays(getAnchor().toISOString().slice(0, 10), -months * 30);
       const accounts = await getPortfolioAccounts();
       let expectedCents = 0;
       for (const account of accounts) {

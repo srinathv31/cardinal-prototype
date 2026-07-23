@@ -8,6 +8,7 @@
 
 import {
   getAccount,
+  getAnchor,
   getBalanceTransferEvents,
   getPayments,
   projectInterest,
@@ -102,7 +103,7 @@ async function resolveBtLifecycleTimeline(accountId: string): Promise<RenderInst
     {
       id: 'today',
       label: 'Today',
-      date: formatDate(new Date().toISOString()),
+      date: formatDate(getAnchor().toISOString()),
       detail: `${formatCurrency(remaining)} remaining`,
       kind: 'today',
     },

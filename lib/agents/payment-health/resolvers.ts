@@ -5,7 +5,7 @@
 // reaches a screen is computed here, from adapter data, and validated
 // against the registry schema before it can stream (§5a).
 
-import { getAccount, getPayments, getTransactions } from '@/lib/soe';
+import { getAccount, getAnchor, getPayments, getTransactions } from '@/lib/soe';
 import type { Payment } from '@/lib/soe';
 import type { EvidenceSpec } from '@/lib/registry/evidence';
 import {
@@ -66,16 +66,12 @@ function utilizationTone(pct: number): Tone {
 }
 
 /**
- * Days between an ISO date and "now" (positive = in the past). Compares
- * against the wall clock, matching the adapter's own default anchor
- * (lib/soe/seed/anchor.ts uses `new Date()` when DEMO_ANCHOR_DATE is unset).
- * The adapter doesn't expose the demo anchor publicly and resolvers may only
- * call lib/soe, so this only diverges from the seed's relative-date story if
- * DEMO_ANCHOR_DATE is pinned to a date other than the real today — a
- * rehearsal-only scenario, not the default run path.
+ * Days between an ISO date and the demo anchor (positive = in the past).
+ * Uses the adapter's `getAnchor()` so counts match the seed's day-offset
+ * story even when DEMO_ANCHOR_DATE pins a rehearsal date.
  */
 function daysSince(isoDate: string): number {
-  const ms = Date.now() - new Date(`${isoDate}T00:00:00.000Z`).getTime();
+  const ms = getAnchor().getTime() - new Date(`${isoDate}T00:00:00.000Z`).getTime();
   return Math.floor(ms / 86_400_000);
 }
 

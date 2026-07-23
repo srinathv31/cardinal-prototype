@@ -9,6 +9,7 @@
 
 import {
   getAccount,
+  getAnchor,
   getBalanceTransferEvents,
   getPartiesForAccount,
   getPortfolioAccounts,
@@ -38,12 +39,9 @@ function validateInstruction(instruction: RenderInstruction): RenderInstruction 
 /** ISO date (YYYY-MM-DD) `months` trailing months before "now", on the
  * seed's 30-day statement cadence (lib/soe/seed/background.ts) — consistent
  * with the day-offset convention the rest of the seed uses (CLAUDE.md).
- * Reads the real wall clock the same way lib/agents/format.ts's daysSince/
- * daysUntil do, so this only diverges from the adapter's own anchor if
- * DEMO_ANCHOR_DATE is pinned to a date other than today (payment-health/
- * resolvers.ts documents the same caveat). */
+ * "Now" is the demo anchor (`getAnchor()`). */
 function trailingWindowStart(months: number): string {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getAnchor().toISOString().slice(0, 10);
   return shiftDays(todayIso, -months * 30);
 }
 
