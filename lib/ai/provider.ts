@@ -7,6 +7,11 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createAzure } from '@ai-sdk/azure';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel } from 'ai';
+import type { LanguageModelV4 } from '@ai-sdk/provider';
+import { demoMode } from './demo-mode';
+import { createFallbackModel } from './scripted/fallback-model';
+import { createScriptedModel } from './scripted/scripted-model';
+import type { AgentScript } from './scripted/types';
 
 export type CardinalProvider = 'anthropic' | 'openai' | 'azure';
 
@@ -48,6 +53,19 @@ export function assertProviderConfigured(): void {
   }
 }
 
+/**
+ * Non-throwing sibling of assertProviderConfigured — used by getAgentModel
+ * (W4.1) to decide, in DEMO_MODE=scripted, whether a real model is even
+ * worth trying before falling back to the pure scripted model. Scripted mode
+ * with no provider env configured must never throw (brief §8.1: the demo
+ * "must be completable with the network down"), which rules out reusing
+ * assertProviderConfigured directly here.
+ */
+export function isProviderConfigured(): boolean {
+  const missing = requiredEnvVars(currentProvider()).filter((name) => !process.env[name]);
+  return missing.length === 0;
+}
+
 /** Returns the configured LanguageModel — the "one-file swap" for the provider. */
 export function getLanguageModel(): LanguageModel {
   assertProviderConfigured();
@@ -70,4 +88,38 @@ export function getLanguageModel(): LanguageModel {
     case 'azure':
       return createAzure()(modelId);
   }
+}
+
+/**
+ * Returns the LanguageModel a given agent should use, per DEMO_MODE (brief
+ * §8.1 / CLAUDE.md):
+ *  - `live`: identical to pre-W4.1 behavior — the configured real model,
+ *    throwing if the active provider's env vars are missing.
+ *  - `scripted` with a configured provider: the real model wrapped by
+ *    lib/ai/scripted/fallback-model.ts, which races every doGenerate/
+ *    doStream call against a timeout and falls back to the deterministic
+ *    script (lib/ai/scripted/scripted-model.ts) on error or timeout.
+ *  - `scripted` with no provider env configured: the pure scripted model —
+ *    this branch never calls assertProviderConfigured and never throws, so
+ *    every agent completes a full run with no API key and no network.
+ */
+export function getAgentModel(script: AgentScript): LanguageModel {
+  if (demoMode() === 'live') {
+    return getLanguageModel();
+  }
+
+  if (!isProviderConfigured()) {
+    return createScriptedModel(script);
+  }
+
+  // getLanguageModel()'s declared return type is the broad `LanguageModel`
+  // union (GlobalProviderModelId | V2 | V3 | V4) for provider-agnosticism,
+  // but every factory this module calls — createAnthropic/createOpenAI/
+  // createAzure, all pinned to @ai-sdk/*@4.x per the dependency freeze — is
+  // declared to return LanguageModelV4 concretely (verified against each
+  // package's dist/index.d.ts; see docs/ai-sdk7-notes.md). The cast below
+  // just restores that precision for the fallback wrapper, which needs the
+  // concrete V4 shape to race doGenerate/doStream.
+  const primary = getLanguageModel() as LanguageModelV4;
+  return createFallbackModel({ primary, fallback: createScriptedModel(script) });
 }

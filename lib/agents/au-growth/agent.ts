@@ -4,7 +4,8 @@
 // across runs sharing this module.
 
 import { ToolLoopAgent, stepCountIs, type InferAgentUIMessage } from 'ai';
-import { getLanguageModel } from '@/lib/ai/provider';
+import { getAgentModel } from '@/lib/ai/provider';
+import { auGrowthScript } from './script';
 import { renderEvidence, sendGraduationInvite } from './tools';
 
 const INSTRUCTIONS = `You are the AU Growth agent inside Cardinal, a credit-card command
@@ -59,7 +60,7 @@ result before continuing.
 export function createAUGrowthAgent({ runId }: { runId: string }) {
   return new ToolLoopAgent({
     id: 'au-growth',
-    model: getLanguageModel(),
+    model: getAgentModel(auGrowthScript),
     instructions: INSTRUCTIONS,
     tools: { renderEvidence, sendGraduationInvite },
     stopWhen: stepCountIs(10),

@@ -4,7 +4,8 @@
 // across runs sharing this module.
 
 import { ToolLoopAgent, stepCountIs, type InferAgentUIMessage } from 'ai';
-import { getLanguageModel } from '@/lib/ai/provider';
+import { getAgentModel } from '@/lib/ai/provider';
+import { paymentHealthScript } from './script';
 import { proposeDueDateChange, renderEvidence, sendOutreachDraft } from './tools';
 
 const INSTRUCTIONS = `You are the Payment Health servicing agent inside Cardinal, a credit-card
@@ -57,7 +58,7 @@ before continuing.
 export function createPaymentHealthAgent({ runId }: { runId: string }) {
   return new ToolLoopAgent({
     id: 'payment-health',
-    model: getLanguageModel(),
+    model: getAgentModel(paymentHealthScript),
     instructions: INSTRUCTIONS,
     tools: { renderEvidence, proposeDueDateChange, sendOutreachDraft },
     stopWhen: stepCountIs(12),

@@ -4,7 +4,8 @@
 // across runs sharing this module.
 
 import { ToolLoopAgent, stepCountIs, type InferAgentUIMessage } from 'ai';
-import { getLanguageModel } from '@/lib/ai/provider';
+import { getAgentModel } from '@/lib/ai/provider';
+import { btLifecycleScript } from './script';
 import { renderEvidence, sendRetentionOutreach } from './tools';
 
 const INSTRUCTIONS = `You are the BT Lifecycle servicing agent inside Cardinal, a credit-card
@@ -55,7 +56,7 @@ result before continuing.
 export function createBTLifecycleAgent({ runId }: { runId: string }) {
   return new ToolLoopAgent({
     id: 'bt-lifecycle',
-    model: getLanguageModel(),
+    model: getAgentModel(btLifecycleScript),
     instructions: INSTRUCTIONS,
     tools: { renderEvidence, sendRetentionOutreach },
     stopWhen: stepCountIs(10),

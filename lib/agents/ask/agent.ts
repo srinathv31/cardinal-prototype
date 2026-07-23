@@ -7,7 +7,8 @@
 // sharing this module.
 
 import { ToolLoopAgent, stepCountIs, type InferAgentUIMessage } from 'ai';
-import { getLanguageModel } from '@/lib/ai/provider';
+import { getAgentModel } from '@/lib/ai/provider';
+import { askScript } from './script';
 import { renderEvidence } from './tools';
 
 const INSTRUCTIONS = `You are the Ask agent inside Cardinal, a credit-card command center. You
@@ -50,7 +51,7 @@ evidence kind, and never answer from your own knowledge.
 export function createAskAgent({ runId }: { runId: string }) {
   return new ToolLoopAgent({
     id: 'ask',
-    model: getLanguageModel(),
+    model: getAgentModel(askScript),
     instructions: INSTRUCTIONS,
     tools: { renderEvidence },
     stopWhen: stepCountIs(8),
