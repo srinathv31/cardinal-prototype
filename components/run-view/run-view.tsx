@@ -6,7 +6,7 @@
 // business logic — this component only wires wire-contract state
 // (docs/wire-contract.md) to the three pane renderers and static copy.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,10 @@ import { ApprovalRail } from "./approval-rail";
 import { formatDateTime, hasPendingApproval } from "./utils";
 
 type RunStatus = "idle" | "streaming" | "awaiting-approval" | "done" | "error";
+
+// Inert subscribe for useSyncExternalStore below — the "store" (a lazily
+// generated client-only id) never changes after first read.
+const subscribeNever = () => () => {};
 
 export function RunView({
   trigger,
@@ -63,7 +67,17 @@ function RunViewInstance({
   autoStart?: boolean;
   onNewRun: () => void;
 }) {
-  const [runId] = useState(() => `run-${crypto.randomUUID()}`);
+  // runId is client-generated: a UUID from a useState initializer would be
+  // regenerated during hydration and mismatch the SSR HTML on every load.
+  // useSyncExternalStore renders the server snapshot (undefined) through
+  // hydration, then swaps in the lazily generated id — nothing needs the id
+  // before the first interaction, which can't happen that early.
+  const generatedRunIdRef = useRef<string | undefined>(undefined);
+  const runId = useSyncExternalStore(
+    subscribeNever,
+    () => (generatedRunIdRef.current ??= `run-${crypto.randomUUID()}`),
+    () => undefined,
+  );
   const transport = useMemo(
     () => new DefaultChatTransport<CardinalUIMessage>({ api: `/api/agents/${agentId}/stream` }),
     [agentId],
@@ -89,6 +103,9 @@ function RunViewInstance({
           : "done";
 
   function handleRun() {
+    // runId is set in the first effect pass, before any paint — this guard
+    // only matters if a synthetic click lands pre-effect.
+    if (!runId) return;
     sendMessage({ text: JSON.stringify(trigger, null, 2) });
   }
 
@@ -99,12 +116,12 @@ function RunViewInstance({
   // (messages haven't round-tripped yet) and send the trigger message twice.
   const autoStartFiredRef = useRef(false);
   useEffect(() => {
-    if (autoStart && !hasStarted && !autoStartFiredRef.current) {
+    if (autoStart && runId && !hasStarted && !autoStartFiredRef.current) {
       autoStartFiredRef.current = true;
       handleRun();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart]);
+  }, [autoStart, runId]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -112,7 +129,7 @@ function RunViewInstance({
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-base font-semibold text-foreground">{agentName}</span>
           <span className="font-mono text-sm text-muted-foreground" title={runId}>
-            {runId.length > 18 ? `${runId.slice(0, 18)}…` : runId}
+            {runId ? (runId.length > 18 ? `${runId.slice(0, 18)}…` : runId) : "—"}
           </span>
           <StatusChip status={runStatus} />
         </div>
@@ -123,7 +140,7 @@ function RunViewInstance({
         ) : null}
       </div>
 
-      {!hasStarted ? (
+      {!hasStarted || !runId ? (
         <TriggerCard trigger={trigger} agentName={agentName} onRun={handleRun} />
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[6fr_9fr_5fr]">
