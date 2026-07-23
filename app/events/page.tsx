@@ -1,14 +1,14 @@
 import { PageHeader } from "@/components/shell/page-header";
 
-export default function CommandCenterPage() {
+export default function EventLogPage() {
   return (
     <div>
       <PageHeader
-        title="Command Center"
-        description="Live event stream, agent status, and portfolio KPIs. (P3: event ticker, agent cards, recent approvals.)"
+        title="Event Log"
+        description="Every run, tool call, and approval — timestamped and attributable. (P3: filterable audit table, W3.2.)"
       />
       <div className="grid h-64 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">
-        Dashboard shell — built in P3 (W3.1)
+        Audit table shell — built in P3 (W3.2)
       </div>
     </div>
   );

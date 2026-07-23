@@ -1,14 +1,14 @@
 import { PageHeader } from "@/components/shell/page-header";
 
-export default function CommandCenterPage() {
+export default function AskPage() {
   return (
     <div>
       <PageHeader
-        title="Command Center"
-        description="Live event stream, agent status, and portfolio KPIs. (P3: event ticker, agent cards, recent approvals.)"
+        title="Ask"
+        description="Live portfolio questions answered with generative UI over seed data. (P3: W3.3.)"
       />
       <div className="grid h-64 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">
-        Dashboard shell — built in P3 (W3.1)
+        Ask shell — built in P3 (W3.3)
       </div>
     </div>
   );

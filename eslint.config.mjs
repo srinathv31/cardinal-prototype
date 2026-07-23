@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored registry code (shadcn + AI Elements) — typechecked, not linted.
+    "components/ui/**",
+    "components/ai-elements/**",
   ]),
 ]);
 
