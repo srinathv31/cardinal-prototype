@@ -15,14 +15,35 @@
 // mirrors app/runs/page.tsx's `force-dynamic` note: a statically
 // prerendered page would freeze the anchor at build time and drift the
 // story facts by a day per day.
+//
+// `?scenario=graph-rehearsal` (W2.1) is an additive, rehearsal-only entry
+// point for the P2 gate: it swaps in graphRehearsalScenario and skips the
+// replay-log fetch entirely (that scenario carries no emitEvent steps, so
+// there's nothing for the fetch to feed). The audience never sees this
+// query string; any other value or its absence is the exact demo path
+// above, untouched.
 
 import { Stage } from "@/components/sentinel/stage";
 import { getSentinelReplayLog } from "@/lib/soe";
 import { buildDemoScenario } from "@/lib/sentinel/scenario/demo-scenario";
+import { graphRehearsalScenario } from "@/lib/sentinel/scenario/graph-rehearsal";
 
 export const dynamic = "force-dynamic";
 
-export default async function SentinelPage() {
+export default async function SentinelPage({
+  searchParams,
+}: {
+  // Next 16: searchParams is a Promise — await it before reading anything
+  // off it (see app/runs/page.tsx's identical note).
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const { scenario: scenarioParam } = await searchParams;
+  const scenarioName = Array.isArray(scenarioParam) ? scenarioParam[0] : scenarioParam;
+
+  if (scenarioName === "graph-rehearsal") {
+    return <Stage scenario={graphRehearsalScenario} />;
+  }
+
   const replayEvents = await getSentinelReplayLog();
   const scenario = buildDemoScenario({ replayEvents });
 

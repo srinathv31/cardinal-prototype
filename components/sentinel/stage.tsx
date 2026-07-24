@@ -55,7 +55,12 @@ export function Stage({ scenario }: { scenario: SentinelScenario }) {
           counter={state.counter}
           caption={state.counterCaption}
         />
-        <LiveAgentGraph />
+        <LiveAgentGraph
+          nodes={state.graph.nodes}
+          animatedEdges={state.graph.animatedEdges}
+          headline={state.headline}
+          approvalPending={state.status === "awaiting-approval"}
+        />
         <ContextRail items={state.contextItems} />
       </div>
       <AuditStrip entries={state.auditEntries} />
