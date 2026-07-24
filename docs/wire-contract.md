@@ -316,3 +316,144 @@ slower.
   (`lib/agents/payment-health/tools.ts` derives them deterministically from
   `accountId` — never random — which is exactly what "replays clean,
   repeatedly" requires).
+
+---
+
+## 9. Sentinel scenario stream (v2, additive)
+
+The Sentinel stage (`/sentinel`, CARDINAL_V2_SENTINEL_BRIEF.md §4) is driven
+by a `ScenarioPlayer` (`lib/sentinel/scenario/player.ts`) instead of an AI
+SDK agent run — this build is 100% scripted, no LLM calls (brief §9). The
+player publishes a message stream whose **payloads reuse the existing wire
+contract wherever one already fits** — `RenderInstruction` (§3),
+`ApprovalCardProps` (§4), `EventLogEntry` (§5), `StreamEvent` (§6) — and adds
+only the envelope types this stage needs. Like the rest of this document,
+nothing here is React-specific: `SentinelStreamMessage` is a plain JSON
+shape any renderer (the current React stage, or a future port) can consume,
+and this section is transport-agnostic — §9.3 gives one representative
+transport, not the only legal one.
+
+This is a **versioned, additive extension**: nothing in §§1–8 changes, and
+every Sentinel message carries its own `seq` rather than reusing any part of
+§2's `UIMessage`/`UIMessageChunk` model. Per brief §10, this contract is what
+the post-review real Sentinel runtime must emit — the ScenarioPlayer is the
+reference implementation, not the spec.
+
+### 9.1 Scenario step format
+
+A `SentinelScenario` (`lib/sentinel/scenario/types.ts`) is `{ id, steps }` —
+an ordered, checked-in list of `ScenarioStep`s. Every variant except
+`actMarker` and `awaitApproval` carries `delayMs`: how long the player waits
+(divided by the current playback speed) before executing that step.
+
+| Step | Fields | Notes |
+|---|---|---|
+| `actMarker` | `act: 1\|2\|3`, `title` | No `delayMs`. Playback PAUSES on reaching one — act transitions are presenter-triggered, never automatic (brief §4). |
+| `emitEvent` | `delayMs`, `event: StreamEvent`, `highlight?`, `complianceBadge?` | Feeds the replay rail. `highlight` is Act III's catch; `complianceBadge` is a compliance-pass beat (e.g. Elena's R3 check). |
+| `graphStep` | `delayMs`, `nodeId: SentinelNodeId`, `nodeState: 'idle'\|'working'\|'done'`, `animatedEdges?` | One node's state transition on the live agent graph. `animatedEdges`, when present, REPLACES the animated-edge set wholesale — declarative, not a diff, because the graph renderer holds no logic. |
+| `narration` | `delayMs`, `id`, `text` | Played back chunked (§9.2), typing-effect style. |
+| `render` | `delayMs`, `id`, `instruction: RenderInstruction` | Same `{ component, props }` shape §3 documents — registry components only. |
+| `awaitApproval` | `id`, `payload: ApprovalCardProps`, `audit` | HARD-BLOCKS playback until resolved — no auto-approve, no timeout (v1 §4 carries over verbatim). No `delayMs`: the block itself is the wait. `audit` is `Omit<EventLogEntry, 'id'\|'timestamp'\|'kind'\|'actor'>` — the fields `kind`/`actor` get filled in from the resolution (§9.2). |
+| `counterUpdate` | `delayMs`, `counter: { events, violations, flagged }`, `caption?` | The replay-rail counter (brief §3's "14 events · 1 violation · 0 flagged" beats). |
+| `auditWrite` | `delayMs`, `entry: Omit<EventLogEntry, 'id'\|'timestamp'>` | Appends straight to the shared Event Log via §9.4 — `id`/`timestamp` are assigned on append, exactly like every other entry in §5. |
+
+`SentinelNodeId` is the six fixed graph nodes: `orchestrator`,
+`policy-analyst`, `rule-engineer`, `data-collector`, `critic`,
+`approval-gate` (brief §4's fixed six-node layout — no node is ever added or
+removed at runtime).
+
+### 9.2 Published message union
+
+`SentinelStreamMessage` mirrors `ScenarioStep` one-for-one, minus `delayMs`
+(consumed by the time a message publishes) and minus the two variants that
+split into a different shape:
+
+- `narration` → one or more `narrationDelta` messages: `{ type:
+  'narrationDelta', id, delta, done }`. Fixed 3-character chunks on a fixed
+  16ms cadence (scaled by speed) — no randomness anywhere in this stream
+  (brief §8). Concatenating every `delta` for one `id`, in `seq` order,
+  reconstructs the step's original `text` exactly; `done: true` marks the
+  final chunk.
+- `awaitApproval` → an `approvalRequest` message when the gate opens (`{
+  type: 'approvalRequest', id, payload }`), and — once resolved — an
+  `approvalResolved` message (`{ type: 'approvalResolved', id, approved }`)
+  immediately followed by an `auditWrite` message built from the step's
+  `audit` field plus `kind: approved ? 'approval.granted' : 'approval.denied'`
+  and `actor: 'human'` (§5's human-decision convention, unchanged).
+
+Every other step publishes one message of the same `type`, carrying the
+same fields minus `delayMs`:
+
+```ts
+type SentinelStreamMessage =
+  | { type: 'actMarker'; act: 1 | 2 | 3; title: string; seq: number }
+  | {
+      type: 'emitEvent';
+      event: StreamEvent;
+      highlight?: boolean;
+      complianceBadge?: string;
+      seq: number;
+    }
+  | {
+      type: 'graphStep';
+      nodeId: SentinelNodeId;
+      nodeState: 'idle' | 'working' | 'done';
+      animatedEdges?: Array<{ from: SentinelNodeId; to: SentinelNodeId }>;
+      seq: number;
+    }
+  | { type: 'narrationDelta'; id: string; delta: string; done: boolean; seq: number }
+  | { type: 'render'; id: string; instruction: RenderInstruction; seq: number }
+  | { type: 'approvalRequest'; id: string; payload: ApprovalCardProps; seq: number }
+  | { type: 'approvalResolved'; id: string; approved: boolean; seq: number }
+  | {
+      type: 'counterUpdate';
+      counter: { events: number; violations: number; flagged: number };
+      caption?: string;
+      seq: number;
+    }
+  | { type: 'auditWrite'; entry: Omit<EventLogEntry, 'id' | 'timestamp'>; seq: number };
+```
+
+Every message carries a monotonically increasing `seq` — the ordering
+guarantee a consumer relies on instead of arrival order (which a future
+non-in-process transport might not preserve byte-for-byte).
+
+### 9.3 Transport (reference; not the contract)
+
+The checked-in `ScenarioPlayer` is an in-process, synchronous publisher — no
+network hop, matching brief §9 ("no LLM calls, no external APIs, no network
+dependency"). A `subscribe(listener)` / `getSnapshot()` pair
+(`useSyncExternalStore`-shaped) is how the current React stage consumes it.
+A future real runtime is free to put the identical message union on the
+wire however fits its transport (SSE, WebSocket, or another in-process
+publisher) — §9.2's shapes are the contract; how they cross a process
+boundary is not.
+
+### 9.4 Sentinel's Event Log ingestion
+
+`POST /api/sentinel/audit` — body `Omit<EventLogEntry, 'id' | 'timestamp'>`,
+validated (zod: `agentId` must start with `"sentinel"`, `runId` non-empty,
+`step` integer ≥ −1, `actor` ∈ `{agent, human}`, `kind` one of §5's
+`EventLogEntryKind` values). On success, appends via the same
+`lib/events/store.ts` §5 already documents and returns `{ entry }` (200); on
+validation failure, `{ error }` (400). This is how `auditWrite` messages
+(direct steps and approval-derived alike, §9.2) reach the shared Event Log —
+the ScenarioPlayer itself never fetches; the stage subscribes to its
+messages and calls this route. Sentinel entries are indistinguishable in
+shape from any §5 entry, which is the point: one audit surface for
+everything (brief §3 Act III's closing beat).
+
+### 9.5 Contract guarantees (Sentinel-specific restatement of §7)
+
+1. Every figure the replay rail, graph, or context rail renders originated
+   in a scenario step's literal data or an SOE-backed `RenderInstruction` —
+   never computed client-side (mirrors §7.1/brief §5a; the ScenarioPlayer
+   plays a script, it doesn't compute anything either).
+2. Approval gates are real pauses: `awaitApproval` has no timer and no
+   auto-approve path outside `jumpToAct`'s explicitly-documented rehearsal
+   semantics (`lib/sentinel/scenario/player.ts`), which exist for presenter
+   rehearsal only and are never reachable from the presenter bar's normal
+   play/pause/reset controls.
+3. Only registry components render from `render` steps, ever (§3 unchanged).
+4. Every Sentinel audit write is reconstructable from `GET /api/events`
+   (§1), same as every v1 entry.

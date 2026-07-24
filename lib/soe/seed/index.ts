@@ -7,12 +7,14 @@ import { buildBackground } from './background';
 import { buildElena } from './elena';
 import { buildMarcus } from './marcus';
 import { buildPatel } from './patel';
+import { buildSentinel } from './sentinel';
 import type {
   Account,
   AccountPartyRole,
   BalanceTransferEvent,
   Party,
   Payment,
+  PromoNoticeRecord,
   StreamEvent,
   Transaction,
 } from '../types';
@@ -27,6 +29,11 @@ export interface SeedDb {
   payments: Payment[];
   balanceTransferEvents: BalanceTransferEvent[];
   streamEvents: StreamEvent[];
+  // v2 "Sentinel" additions (brief §5) — new collections only; never merged
+  // into the arrays above except Marcus's BT event (see below), which is the
+  // one deliberate, documented exception (v2-reuse-map.md §5 guardrail).
+  promoNotices: PromoNoticeRecord[];
+  sentinelReplayEvents: StreamEvent[];
 }
 
 export function buildSeedDb(anchor: Date): SeedDb {
@@ -34,6 +41,7 @@ export function buildSeedDb(anchor: Date): SeedDb {
   const elena = buildElena(anchor);
   const patel = buildPatel(anchor);
   const background = buildBackground(anchor);
+  const sentinel = buildSentinel(anchor);
 
   return {
     parties: [
@@ -60,12 +68,18 @@ export function buildSeedDb(anchor: Date): SeedDb {
       ...background.transactions,
     ],
     payments: [...marcus.payments, ...elena.payments, ...patel.payments],
-    balanceTransferEvents: [...elena.btEvents, ...background.btEvents],
+    balanceTransferEvents: [
+      ...elena.btEvents,
+      ...background.btEvents,
+      sentinel.btEvent,
+    ],
     streamEvents: [
       ...marcus.streamEvents,
       ...elena.streamEvents,
       ...patel.streamEvents,
       ...background.streamEvents,
     ],
+    promoNotices: sentinel.promoNotices,
+    sentinelReplayEvents: sentinel.replayEvents,
   };
 }

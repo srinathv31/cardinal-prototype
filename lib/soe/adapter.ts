@@ -10,6 +10,7 @@ import type {
   BalanceTransferEvent,
   Party,
   Payment,
+  PromoNoticeRecord,
   StreamEvent,
   Transaction,
 } from './types';
@@ -102,5 +103,22 @@ export async function getPortfolioAccounts(): Promise<Account[]> {
 export async function getEventStream(): Promise<StreamEvent[]> {
   return [...getDb().streamEvents].sort((a, b) =>
     b.timestamp.localeCompare(a.timestamp),
+  );
+}
+
+// v2 "Sentinel" additions (brief §5) — new exports only; nothing above changes.
+
+export async function getPromoNotices(
+  accountId: string,
+): Promise<PromoNoticeRecord[]> {
+  return getDb()
+    .promoNotices.filter((n) => n.accountId === accountId)
+    .sort((a, b) => a.sentDate.localeCompare(b.sentDate));
+}
+
+/** The 14-event "night" replay log, ascending by timestamp (Sentinel Act I/III). */
+export async function getSentinelReplayLog(): Promise<StreamEvent[]> {
+  return [...getDb().sentinelReplayEvents].sort((a, b) =>
+    a.timestamp.localeCompare(b.timestamp),
   );
 }

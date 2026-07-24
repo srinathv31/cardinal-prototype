@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   ScrollText,
+  Shield,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -17,6 +18,7 @@ const links = [
   { href: "/workflows", label: "Workflow Canvas", icon: Workflow },
   { href: "/runs", label: "Agent Runs", icon: Activity },
   { href: "/ask", label: "Ask", icon: MessageSquare },
+  { href: "/sentinel", label: "Sentinel", icon: Shield },
   { href: "/events", label: "Event Log", icon: ScrollText },
 ];
 

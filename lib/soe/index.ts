@@ -3,6 +3,9 @@
 
 export * from './adapter';
 export * from './types';
+// v2 "Sentinel" additions (brief §5) — getPromoNotices, getSentinelReplayLog,
+// and PromoNoticeRecord already flow through the wildcard exports above; no
+// separate export line needed.
 
 // Deterministic money math shared with the seed generator — formulas, not
 // data access. Re-exported here so resolvers can project interest with the
