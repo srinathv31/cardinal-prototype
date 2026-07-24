@@ -319,46 +319,51 @@ slower.
 
 ---
 
-## 9. Sentinel scenario stream (v2, additive)
+## 9. Sentinel scenario stream (v3)
 
-The Sentinel stage (`/sentinel`, CARDINAL_V2_SENTINEL_BRIEF.md §4) is driven
-by a `ScenarioPlayer` (`lib/sentinel/scenario/player.ts`) instead of an AI
-SDK agent run — this build is 100% scripted, no LLM calls (brief §9). The
-player publishes a message stream whose **payloads reuse the existing wire
-contract wherever one already fits** — `RenderInstruction` (§3),
-`ApprovalCardProps` (§4), `EventLogEntry` (§5), `StreamEvent` (§6) — and adds
-only the envelope types this stage needs. Like the rest of this document,
-nothing here is React-specific: `SentinelStreamMessage` is a plain JSON
-shape any renderer (the current React stage, or a future port) can consume,
-and this section is transport-agnostic — §9.3 gives one representative
-transport, not the only legal one.
+The Sentinel stage (`/sentinel`, CARDINAL_V3_AU_BRIEF.md §4) is driven by a
+`ScenarioPlayer` (`lib/sentinel/scenario/player.ts`) instead of an AI SDK agent
+run — this build is 100% scripted, no LLM calls (brief §10). The player
+publishes a message stream whose **payloads reuse the existing wire contract
+wherever one already fits** — `RenderInstruction` (§3), `ApprovalCardProps`
+(§4), `EventLogEntry` (§5) — and adds only the envelope types this stage needs.
+Like the rest of this document, nothing here is React-specific:
+`SentinelStreamMessage` is a plain JSON shape any renderer (the current React
+stage, or a future port) can consume, and this section is transport-agnostic —
+§9.3 gives one representative transport, not the only legal one.
 
-This is a **versioned, additive extension**: nothing in §§1–8 changes, and
-every Sentinel message carries its own `seq` rather than reusing any part of
-§2's `UIMessage`/`UIMessageChunk` model. Per brief §10, this contract is what
-the post-review real Sentinel runtime must emit — the ScenarioPlayer is the
+This is a **versioned extension**: nothing in §§1–8 changes, and every Sentinel
+message carries its own `seq` rather than reusing any part of §2's
+`UIMessage`/`UIMessageChunk` model. Per brief §11, this contract is what the
+post-review real Sentinel runtime must emit — the ScenarioPlayer is the
 reference implementation, not the spec.
+
+**This section is v3 and supersedes the v2 balance-transfer stream it replaced
+in place.** v2's `emitEvent` / `railReset` / `narration` steps and its
+`{ events, violations, flagged }` counter no longer exist in any form: v3 has
+no event replay rail, and its sweep is an aggregate over the whole book rather
+than a night of streamed events. `docs/v3-migration-map.md` §4 records the
+change set; this section documents only what a runtime must emit today.
 
 ### 9.1 Scenario step format
 
 A `SentinelScenario` (`lib/sentinel/scenario/types.ts`) is `{ id, steps }` —
 an ordered, checked-in list of `ScenarioStep`s. Every variant except
-`actMarker` and `awaitApproval` carries `delayMs`: how long the player waits
-(divided by the current playback speed) before executing that step.
+`actMarker`, `awaitApproval`, and `awaitStageAction` carries `delayMs`: how
+long the player waits (divided by the current playback speed) before executing
+that step.
 
 | Step | Fields | Notes |
 |---|---|---|
-| `actMarker` | `act: 1\|2\|3`, `title` | No `delayMs`. Playback PAUSES on reaching one — act transitions are presenter-triggered, never automatic (brief §4). |
-| `emitEvent` | `delayMs`, `event: StreamEvent`, `highlight?`, `complianceBadge?` | Feeds the replay rail. `highlight` is Act III's catch; `complianceBadge` is a compliance-pass beat (e.g. Elena's R3 check). |
-| `graphStep` | `delayMs`, `nodeId: SentinelNodeId`, `nodeState: 'idle'\|'working'\|'done'\|'armed'`, `animatedEdges?`, `detail?` | One node's state transition on the live agent graph. `armed` is Act II's post-activation "idle-armed" state (brief §3 beat 4) — rules live, nothing in flight, a subtle pulse instead of fully dark. `animatedEdges`, when present, REPLACES the animated-edge set wholesale — declarative, not a diff, because the graph renderer holds no logic. `detail`, when present, is a short per-node activity caption rendered in place of the node's state word (Act III's "call 1 · BT event detail" / "call 2 · payment history" — brief §3: the Data Collector fires "visibly two calls"); same wholesale semantics — a `graphStep` WITH `detail` sets that node's caption, one WITHOUT clears it. |
-| `narration` | `delayMs`, `id`, `text` | Played back chunked (§9.2), typing-effect style. |
-| `render` | `delayMs`, `id`, `instruction: SentinelRenderInstruction` | Same `{ component, props }` shape §3 documents, widened to the Sentinel-only additive components of §9.6 — registry components only. A step reusing an earlier step's `id` REPLACES that rendered item in place (position preserved) instead of appending a second one — progressive/stateful evidence, e.g. Act II's rule cards flipping proposed→active as the same `id` re-renders with `status: 'active'`. |
+| `actMarker` | `act: 1\|2\|3`, `title` | No `delayMs`. Playback PAUSES on reaching one — act transitions are presenter-triggered, never automatic (brief §3). |
+| `graphStep` | `delayMs`, `nodeId: SentinelNodeId`, `nodeState: 'idle'\|'working'\|'done'\|'armed'`, `animatedEdges?`, `detail?` | One node's state transition on the live agent graph. `armed` is Act II's post-activation "idle-armed" state (brief §3 Act II beat 4) — rules live, nothing in flight, a subtle pulse instead of fully dark. `animatedEdges`, when present, REPLACES the animated-edge set wholesale — declarative, not a diff, because the graph renderer holds no logic. `detail`, when present, is a short per-node activity caption rendered in place of the node's state word (Act III's "call 2 of 3 · party roles" — brief §3: the Data Collector fires "three times, visibly"); same wholesale semantics — a `graphStep` WITH `detail` sets that node's caption, one WITHOUT clears it. |
+| `chatTurn` | `delayMs`, `id`, `role: 'user'\|'agent'`, `text` | One turn in the conversation rail. `role: 'agent'` is played back chunked (§9.2), typing-effect style; `role: 'user'` publishes whole and instantly — a human typed it, the audience already watched that happen. **This is v3's only narration step**: v2's separate `narration` step collapsed into `role: 'agent'` rather than coexisting with it (brief §6a). |
+| `render` | `delayMs`, `id`, `instruction: SentinelRenderInstruction` | Same `{ component, props }` shape §3 documents, widened to the Sentinel-only additive components of §9.6 — registry components only. A step reusing an earlier step's `id` REPLACES that rendered item in place (position preserved) instead of appending a second one — progressive/stateful evidence, e.g. Act II's rule cards flipping proposed→active as the same `id` re-renders with `status: 'active'`, or Act III's `DecisionCard` resolving its routes one at a time. |
 | `awaitApproval` | `id`, `payload: ApprovalCardProps`, `audit` | HARD-BLOCKS playback until resolved — no auto-approve, no timeout (v1 §4 carries over verbatim). No `delayMs`: the block itself is the wait. `audit` is `Omit<EventLogEntry, 'id'\|'timestamp'\|'kind'\|'actor'>` — the fields `kind`/`actor` get filled in from the resolution (§9.2). |
-| `counterUpdate` | `delayMs`, `counter: { events, violations, flagged }`, `caption?` | The replay-rail counter (brief §3's "14 events · 1 violation · 0 flagged" beats). |
+| `awaitStageAction` | `id`, `action: 'policy-drop'\|'prompt'`, `suggested?` | HARD-BLOCKS playback until resolved, exactly like `awaitApproval` (no `delayMs`, no auto-resolve, no timeout) — but models a presenter-driven staging beat that isn't a business decision: Act II's mock file-drop into the policy panel (`'policy-drop'`) and Act III's conversation-rail prompt (`'prompt'`). `suggested` carries the scripted prompt for the rail's suggestion chip. **See §9.2 for the resolution's verbatim-echo rule** — the player never string-matches submitted text. |
+| `counterUpdate` | `delayMs`, `counter: { scanned, exceptions, remediated }`, `caption?` | The large-type counter beats (brief §3: Act I's "1,247 · 0 · 0", Act III's closing "1,247 scanned · 87 exceptions"). `caption` present marks a full-size beat card rather than a quiet counter tick. |
 | `auditWrite` | `delayMs`, `entry: Omit<EventLogEntry, 'id'\|'timestamp'>` | Appends straight to the shared Event Log via §9.4 — `id`/`timestamp` are assigned on append, exactly like every other entry in §5. |
-| `policyPanel` | `delayMs`, `panel: 'closed'\|'drop'\|'preview'` | Drives the Act II policy drawer declaratively (brief §3 beat 1) — the drawer is a pure renderer of this field, no component-local open/closed state. |
-| `awaitStageAction` | `id`, `action: 'policy-drop'` | HARD-BLOCKS playback until resolved, exactly like `awaitApproval` (no `delayMs`, no auto-approve, no timeout) — but models a presenter-driven staging beat that isn't a business decision, e.g. Act II's mock file-drop into the policy panel: a real human gate all the same. |
-| `railReset` | `delayMs` | Clears the replay rail — Act III's fresh observation window (brief §3: "the same night replays"). Act III re-emits the very events Act I already emitted, and `emitEvent` appends unconditionally; without this step the rail would hold both nights at once. Clears ONLY the rail's event list — zeroing the counter stays `counterUpdate`'s job, an orthogonal step the scenario pairs alongside. |
+| `policyPanel` | `delayMs`, `panel: 'closed'\|'drop'\|'preview'` | Drives the Act II policy drawer declaratively (brief §3 Act II beat 1) — the drawer is a pure renderer of this field, no component-local open/closed state. |
 
 `SentinelNodeId` is the six fixed graph nodes: `orchestrator`,
 `policy-analyst`, `rule-engineer`, `data-collector`, `critic`,
@@ -371,12 +376,13 @@ removed at runtime).
 (consumed by the time a message publishes) and minus the three variants that
 split into a different shape:
 
-- `narration` → one or more `narrationDelta` messages: `{ type:
-  'narrationDelta', id, delta, done }`. Fixed 3-character chunks on a fixed
-  16ms cadence (scaled by speed) — no randomness anywhere in this stream
-  (brief §8). Concatenating every `delta` for one `id`, in `seq` order,
-  reconstructs the step's original `text` exactly; `done: true` marks the
-  final chunk.
+- `chatTurn` with `role: 'agent'` → one or more `narrationDelta` messages:
+  `{ type: 'narrationDelta', id, delta, done }`. Fixed 3-character chunks on
+  a fixed 16ms cadence (scaled by speed) — no randomness anywhere in this
+  stream (brief §9). Concatenating every `delta` for one `id`, in `seq`
+  order, reconstructs the step's original `text` exactly; `done: true` marks
+  the final chunk. A `chatTurn` with `role: 'user'` publishes unchanged, as
+  a single message.
 - `awaitApproval` → an `approvalRequest` message when the gate opens (`{
   type: 'approvalRequest', id, payload }`), and — once resolved — an
   `approvalResolved` message (`{ type: 'approvalResolved', id, approved }`)
@@ -384,12 +390,21 @@ split into a different shape:
   `audit` field plus `kind: approved ? 'approval.granted' : 'approval.denied'`
   and `actor: 'human'` (§5's human-decision convention, unchanged).
 - `awaitStageAction` → a `stageActionRequest` message when the gate opens
-  (`{ type: 'stageActionRequest', id, action }`), and — once resolved via
-  `ScenarioPlayer#resolveStageAction` — a `stageActionResolved` message (`{
-  type: 'stageActionResolved', id }`). Same hard-block semantics as
-  `awaitApproval` (no timer, no auto-resolve outside `jumpToAct`'s
-  rehearsal fast-forward, which auto-resolves it exactly as it
-  auto-approves a pending `awaitApproval`).
+  (`{ type: 'stageActionRequest', id, action, suggested? }`), and — once
+  resolved via `ScenarioPlayer#resolveStageAction(id, text?)` — first a
+  `chatTurn` message echoing `text` **verbatim** as a `user` turn (only when
+  text is present), then a `stageActionResolved` message (`{ type:
+  'stageActionResolved', id, text? }`). Same hard-block semantics as
+  `awaitApproval` (no timer, no auto-resolve outside `jumpToAct`'s rehearsal
+  fast-forward, which auto-resolves it exactly as it auto-approves a pending
+  `awaitApproval`, falling back to `suggested` for the echo).
+
+**The verbatim-echo rule (brief §4, §9).** Any submitted text resolves a
+`'prompt'` gate, and the scripted response follows regardless of what was
+typed. A conforming runtime MUST NOT compare the submitted text to
+`suggested`, MUST NOT branch on its content, and MUST echo it unmodified.
+`suggested` is a UI affordance and a rehearsal fallback, never a key — gating
+a live stage on exact string matching is how a demo dies.
 
 Every other step publishes one message of the same `type`, carrying the
 same fields minus `delayMs`:
@@ -398,13 +413,6 @@ same fields minus `delayMs`:
 type SentinelStreamMessage =
   | { type: 'actMarker'; act: 1 | 2 | 3; title: string; seq: number }
   | {
-      type: 'emitEvent';
-      event: StreamEvent;
-      highlight?: boolean;
-      complianceBadge?: string;
-      seq: number;
-    }
-  | {
       type: 'graphStep';
       nodeId: SentinelNodeId;
       nodeState: 'idle' | 'working' | 'done' | 'armed';
@@ -412,32 +420,54 @@ type SentinelStreamMessage =
       detail?: string;
       seq: number;
     }
+  | { type: 'chatTurn'; id: string; role: 'user'; text: string; seq: number }
   | { type: 'narrationDelta'; id: string; delta: string; done: boolean; seq: number }
   | { type: 'render'; id: string; instruction: SentinelRenderInstruction; seq: number }
   | { type: 'approvalRequest'; id: string; payload: ApprovalCardProps; seq: number }
   | { type: 'approvalResolved'; id: string; approved: boolean; seq: number }
   | {
       type: 'counterUpdate';
-      counter: { events: number; violations: number; flagged: number };
+      counter: { scanned: number; exceptions: number; remediated: number };
       caption?: string;
       seq: number;
     }
   | { type: 'auditWrite'; entry: Omit<EventLogEntry, 'id' | 'timestamp'>; seq: number }
   | { type: 'policyPanel'; panel: 'closed' | 'drop' | 'preview'; seq: number }
-  | { type: 'stageActionRequest'; id: string; action: 'policy-drop'; seq: number }
-  | { type: 'stageActionResolved'; id: string; seq: number }
-  | { type: 'railReset'; seq: number };
+  | {
+      type: 'stageActionRequest';
+      id: string;
+      action: 'policy-drop' | 'prompt';
+      suggested?: string;
+      seq: number;
+    }
+  | { type: 'stageActionResolved'; id: string; text?: string; seq: number };
 ```
 
 Every message carries a monotonically increasing `seq` — the ordering
 guarantee a consumer relies on instead of arrival order (which a future
 non-in-process transport might not preserve byte-for-byte).
 
+### 9.2a Derived renderer state
+
+`ScenarioPlayer#getSnapshot()` returns `SentinelStageState`, the
+renderer-friendly projection of the message log above. It is not part of the
+wire contract — a different renderer may project the same messages
+differently — but two fields are worth naming because v2's shape is gone:
+
+- `conversation: Array<{ id, role, text, done }>` — the conversation rail's
+  transcript, oldest first, fed by `chatTurn` and `narrationDelta`. Replaces
+  v2's `railEvents`.
+- `counter: { scanned, exceptions, remediated }` — §9.1's reshape.
+
+`SentinelContextItem` carries `render` and `approval` items only: in v3
+narration lives in the conversation rail and evidence lives in the context
+rail (brief §4), so the context rail's list is evidence and gates.
+
 ### 9.3 Transport (reference; not the contract)
 
 The checked-in `ScenarioPlayer` is an in-process, synchronous publisher — no
-network hop, matching brief §9 ("no LLM calls, no external APIs, no network
-dependency"). A `subscribe(listener)` / `getSnapshot()` pair
+network hop, matching brief §9 ("runs identically with the network cable
+pulled"). A `subscribe(listener)` / `getSnapshot()` pair
 (`useSyncExternalStore`-shaped) is how the current React stage consumes it.
 A future real runtime is free to put the identical message union on the
 wire however fits its transport (SSE, WebSocket, or another in-process
@@ -460,19 +490,21 @@ everything (brief §3 Act III's closing beat).
 
 ### 9.5 Contract guarantees (Sentinel-specific restatement of §7)
 
-1. Every figure the replay rail, graph, or context rail renders originated
-   in a scenario step's literal data or an SOE-backed `RenderInstruction` —
-   never computed client-side (mirrors §7.1/brief §5a; the ScenarioPlayer
-   plays a script, it doesn't compute anything either).
+1. Every figure the conversation rail, graph, or context rail renders
+   originated in a scenario step's literal data or an SOE-backed
+   `RenderInstruction` — never computed client-side (mirrors §7.1/brief §5b;
+   the ScenarioPlayer plays a script, it doesn't compute anything either).
 2. Approval gates are real pauses: `awaitApproval` has no timer and no
    auto-approve path outside `jumpToAct`'s explicitly-documented rehearsal
    semantics (`lib/sentinel/scenario/player.ts`), which exist for presenter
    rehearsal only and are never reachable from the presenter bar's normal
-   play/pause/reset controls.
+   play/pause/reset controls. `awaitStageAction` blocks identically.
 3. Only registry components render from `render` steps, ever — either §3's
    v1 registry or the Sentinel stage components of §9.6, never anything else.
 4. Every Sentinel audit write is reconstructable from `GET /api/events`
    (§1), same as every v1 entry.
+5. A `'prompt'` gate's resolution never changes what plays next (§9.2's
+   verbatim-echo rule).
 
 ### 9.6 Sentinel stage components (additive)
 
@@ -484,91 +516,71 @@ the unchanged v1 registry and Sentinel-only additive components:
 type SentinelRenderInstruction =
   | RenderInstruction
   | { component: 'RuleDiff'; props: RuleDiffProps }
-  | { component: 'BTEventDetail'; props: BTEventDetailProps }
   | { component: 'RuleCitation'; props: RuleCitationProps }
   | { component: 'DecisionCard'; props: DecisionCardProps };
 ```
 
-**Addendum v2.1** (post-P4, CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum)
-widens `RuleDiff` (below) and adds `DecisionCard` (further below) — both
-purely additive: every `RuleDiffProps` value that validated before this
-addendum still validates unchanged, and `DecisionCard` is a new union member,
-not a change to an existing one.
+v3 removed `BTEventDetail` from this union: the sweep is an aggregate, so
+there is no single-event hero card (brief §2b). `PolicyExceptionTable` and
+`RemediationReport` join it in P3 (brief §5c) and are documented here when
+they land.
 
 `lib/sentinel/registry.ts` is a separate, additive component namespace, not a
-change to `lib/registry/schemas.ts` — v1's registry (§3, §5c) is untouched;
-`docs/v2-reuse-map.md` §4 is the complete list of additive touches to
-existing files, and this file is deliberately not on it.
+change to `lib/registry/schemas.ts` — v1's registry (§3, CLAUDE.md 5c) is
+untouched.
 
-**`RuleDiff`** (Act II, brief §3 beat 3) — the split excerpt/plain-English/
-machine-footer card the Rule Diff view renders while the policy document is
-parsed into enforceable rules:
+**`RuleDiff`** (Act II, brief §3 Act II beat 3) — the split
+excerpt/plain-English/machine-footer card the Rule Diff view renders while the
+policy document is parsed into enforceable rules:
 
 | Field | Type | Notes |
 |---|---|---|
-| `title` | `string` | e.g. "BT-Servicing-Policy-2026 → extracted rules". |
+| `title` | `string` | e.g. "AU-Eligibility-Policy-2026 → extracted rules". |
 | `status` | `'proposed' \| 'active'` | `proposed` before the ApprovalCard resolves, `active` once approved. Set by the scenario step, never inferred client-side. |
-| `rules[].ruleId` | `string` | e.g. "R1" (or the obligation id, e.g. "O4", for a `data-gap` row — Addendum v2.1). |
+| `rules[].ruleId` | `string` | e.g. "R1" (or the obligation id, e.g. "O4", for a `data-gap` row). |
 | `rules[].title` | `string` | |
-| `rules[].excerpt.sectionHeading` | `string` | e.g. "New Transfer Eligibility". |
-| `rules[].excerpt.quote` | `string` | Verbatim substring of the policy document — cited, not paraphrased. |
-| `rules[].plainEnglish` | `string` | Model-authored restatement (editorial content, §5a). |
-| `rules[].machine?` | `{ ruleId, datasetsTouched: string[], evaluationTrigger }` | Machine-readable footer. **Addendum v2.1: optional.** Absent on a `data-gap` row — nothing was ever drafted into a machine-readable rule, so there is no footer to show; the renderer's absent-footer branch is how the audience SEES that, not just reads it in a caption. |
-| `rules[].criticNote?` | `string` | Optional — the critic's evaluability note, e.g. "Evaluable with current SOE data: payments + balance-transfer events." For a `data-gap` row this is instead the Critic's reason the obligation is parked, and it is always present on that row. |
+| `rules[].excerpt.sectionHeading` | `string` | e.g. "Product Eligibility". |
+| `rules[].excerpt.quote` | `string` | Verbatim substring of the policy document — cited, not paraphrased (asserted in `lib/sentinel/policy.test.ts`). |
+| `rules[].plainEnglish` | `string` | Model-authored restatement (editorial content, brief §5a). |
+| `rules[].machine?` | `{ ruleId, datasetsTouched: string[], evaluationTrigger }` | Machine-readable footer. Absent on a `data-gap` row — nothing was ever drafted into a machine-readable rule, so there is no footer to show; the renderer's absent-footer branch is how the audience SEES that, not just reads it in a caption. |
+| `rules[].criticNote?` | `string` | The Critic's evaluability note, e.g. "Evaluable with current SOE data: parties carry date of birth, roles carry the date of addition." For a `data-gap` row this is instead the Critic's reason the obligation is parked, and it is always present on that row. |
 | `rules[].validated` | `boolean` | Critic-pass flag, set by the scenario step, never derived client-side. A `data-gap` row is always `false` — there was nothing evaluable to validate. |
-| `rules[].evaluability` | `'evaluable' \| 'data-gap'` | **Addendum v2.1, additive.** Defaults to `'evaluable'` (R1–R3's kind: a normal drafted rule). `'data-gap'` marks an obligation the Policy Analyst extracted but the Critic could not evaluate against current SOE data. Set by the scenario step, never inferred client-side from `machine`'s presence or `validated`'s value. |
+| `rules[].evaluability` | `'evaluable' \| 'data-gap'` | Defaults to `'evaluable'` (R1–R3's kind: a normal drafted rule). `'data-gap'` marks an obligation the Policy Analyst extracted but the Critic could not evaluate against current SOE data (`policyObligationGap`, `lib/sentinel/policy.ts` — v3's is consent-on-file). Set by the scenario step, never inferred client-side from `machine`'s presence or `validated`'s value. |
 
-`rules` holds 1–4 entries (**Addendum v2.1** widens this from 1–3: the three
-extracted rules R1–R3, plus at most one `data-gap` row for an obligation the
-Critic parked instead of validating).
+`rules` holds 1–4 entries: the three extracted rules R1–R3, plus at most one
+`data-gap` row for an obligation the Critic parked instead of validating.
 
-**`BTEventDetail`** (Act III, brief §3 beat 2) — the hero evidence card for
-the balance-transfer event under investigation ("$3,200 initiated 02:47").
-Every field arrives preformatted from the scenario step; the renderer
-performs no lookups or arithmetic (§7.1 / brief §5a):
-
-| Field | Type | Notes |
-|---|---|---|
-| `title` | `string` | e.g. "Balance transfer initiated". |
-| `account` | `string` | Preformatted party + account line, e.g. "Marcus Webb · acct-marcus". |
-| `amount` | `string` | Preformatted display amount — the hero figure, e.g. "$3,200.00". |
-| `timestamp` | `string` | Preformatted, e.g. "02:47 UTC · Aug 5, 2026". |
-| `tone` | `'neutral' \| 'critical'` | Visual accent — set by the scenario step, never inferred client-side. `critical` marks the event under investigation. |
-| `attributes[]` | `{ label, value }` (≤ 6) | Supplementary preformatted key/value facts (promo APR, go-to APR, BT credit line, event id). |
-
-**`RuleCitation`** (Act III, brief §3 beats 2–4) — the rule-text +
-checked-conditions card the investigation renders once a rule is cited
-against the event under review. One component covers both of Act III's
-verdicts: R1's violation (both conditions ✓✓) and R2's clean pass.
+**`RuleCitation`** (Act III, brief §3 Act III beats 4–5) — the rule-text +
+checked-conditions card the investigation renders once a rule is cited against
+a specific flagged relationship. One component covers both of Act III's
+verdicts: the R1 exemplar's violation and the Patel household's clean pass.
 
 | Field | Type | Notes |
 |---|---|---|
 | `ruleId` | `string` | e.g. "R1". |
-| `title` | `string` | e.g. "New Transfer Eligibility Window". |
+| `title` | `string` | e.g. "Product Eligibility". |
 | `ruleText` | `string` | The rule's plain-English text, quoted verbatim from the active rule set — cited, not paraphrased. |
-| `verdict` | `'violation' \| 'pass'` | Set by the scenario step, NEVER derived from `checks` client-side: a card with every check `met: true` is a violation for R1 (all violation conditions confirmed) and a pass for R2 (the compliance condition confirmed) — only the scenario knows which. The renderer colors the check icons from this field alone. |
-| `checks[].label` | `string` | The condition evaluated, e.g. "Missed payment within the 60-day look-back". |
-| `checks[].detail?` | `string` | Preformatted evidence line, e.g. "Minimum $142.00 due Jul 24, 2026 — 12 days before initiation". |
+| `verdict` | `'violation' \| 'pass'` | Set by the scenario step, NEVER derived from `checks` client-side: a card with every check `met: true` is a violation for R1 (all violation conditions confirmed) and a pass for a compliance check (the compliance condition confirmed) — only the scenario knows which. The renderer colors the check icons from this field alone. |
+| `checks[].label` | `string` | The condition evaluated, e.g. "Account product is a secured card". |
+| `checks[].detail?` | `string` | Preformatted evidence line, e.g. "Security deposit $500.00 · line collateralized". |
 | `checks[].met` | `boolean` | Condition-evaluation flag — scripted, never computed by the renderer. |
 
 `checks` holds 1–4 entries.
 
-**`DecisionCard`** (Act III, **Addendum v2.1**, additive — post-P4,
-CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum) — the stacked-options card
-that makes the agent's post-verdict JUDGMENT visible. R1's verdict
-(`RuleCitation` above) is deterministic and stays that way; this card is the
+**`DecisionCard`** (Act III, brief §3 Act III beat 6) — the stacked-options
+card that makes the agent's post-verdict JUDGMENT visible. The rule verdicts
+(`RuleCitation` above) are deterministic and stay that way; this card is the
 different thing that happens next: laying out the compliant response routes,
-then resolving them one at a time as the investigation gathers more evidence
-(the account snapshot + cure check).
+then resolving them one at a time as the investigation completes.
 
 | Field | Type | Notes |
 |---|---|---|
-| `title` | `string` | e.g. "Response to R1 violation". |
-| `subtitle?` | `string` | Optional framing line, e.g. "The verdict is deterministic. The response is a judgment call." |
-| `options[].id` | `string` | Stable route id, e.g. `'hold'` \| `'monitor'` \| `'escalate'` — also the render key, so it stays identical across same-id re-renders. |
+| `title` | `string` | e.g. "Response to 87 policy exceptions". |
+| `subtitle?` | `string` | Optional framing line, e.g. "The findings are deterministic. The response is a judgment call." |
+| `options[].id` | `string` | Stable route id, e.g. `'remove-all'` \| `'stage-for-review'` \| `'remove-and-notify'` — also the render key, so it stays identical across same-id re-renders. |
 | `options[].label` | `string` | |
-| `options[].summary` | `string` | One-line description of the route, e.g. "Pause posting while eligibility is reviewed; reversible." |
-| `options[].status` | `'considering' \| 'selected' \| 'rejected'` | Set by the scenario step at each `render`, NEVER derived client-side from `rationale` or from the other options' statuses — the same invariant `RuleCitation.verdict` carries above (§5a/§5b: the renderer holds no judgment logic of its own). |
+| `options[].summary` | `string` | One-line description of the route. |
+| `options[].status` | `'considering' \| 'selected' \| 'rejected'` | Set by the scenario step at each `render`, NEVER derived client-side from `rationale` or from the other options' statuses — the same invariant `RuleCitation.verdict` carries above (brief §5a/§5b: the renderer holds no judgment logic of its own). |
 | `options[].rationale?` | `string` | Why this route was selected or rejected — present once a route leaves `'considering'`, so rejections are "on the record," not a silent status flip. |
 | `footnote?` | `string` | Small print at the card's foot, e.g. "Whichever route is selected requires human approval before anything executes." |
 
@@ -580,11 +592,11 @@ order on every re-render: the card must read as the same routes
 progressively resolving, never a reshuffled list.
 
 One reuse nuance: on the Sentinel stream, **`OutreachDraftCard` is a legal
-`render` payload** (Act III's scripted ops-notification draft), even though
-§3 documents it as never produced by `renderEvidence` in v1 — there the
-card renders only from action-tool parts (§4). Both statements hold: v1's
-evidence renderer still refuses it, and the Sentinel stage's own routing
-layer (`components/sentinel/evidence`) renders it from `render` steps,
-because on this stream the scripted scenario is the draft's source and
-`render` is the only path to the screen. `ApprovalCard` needs no such
-carve-out — Sentinel approvals ride `awaitApproval`, never `render`.
+`render` payload**, even though §3 documents it as never produced by
+`renderEvidence` in v1 — there the card renders only from action-tool parts
+(§4). Both statements hold: v1's evidence renderer still refuses it, and the
+Sentinel stage's own routing layer (`components/sentinel/evidence`) renders it
+from `render` steps, because on this stream the scripted scenario is the
+draft's source and `render` is the only path to the screen. `ApprovalCard`
+needs no such carve-out — Sentinel approvals ride `awaitApproval`, never
+`render`.

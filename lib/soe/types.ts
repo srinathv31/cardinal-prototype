@@ -18,6 +18,18 @@ export interface Account {
   availableCredit: number;
   purchaseApr: number; // e.g. 24.99
   status: 'ACTIVE' | 'CLOSED' | 'SUSPENDED';
+  /**
+   * v3 "AU policy" additions (brief §5d) — a secured card is one whose credit
+   * line is collateralized by a customer security deposit
+   * (`lib/sentinel/policy.ts` §Definitions). Rule R1 forbids an authorized
+   * user on such an account, which makes `securedCard` the hero rule's only
+   * account-level input. Both fields are optional because only the additive
+   * AU portfolio (`lib/soe/seed/au-portfolio.ts`) carries them; v1's nine
+   * accounts are all unsecured and read as `undefined`, which R1 treats as
+   * "not a secured card" — the same answer, without touching v1's fixtures.
+   */
+  securedCard?: boolean;
+  securityDepositAmount?: number;
 }
 
 export interface AccountPartyRole {
@@ -60,14 +72,6 @@ export interface BalanceTransferEvent {
   goToApr: number;
   remainingBalance?: number;
   timestamp: string;
-  /**
-   * v2 "Sentinel" addition (brief §5, reuse-map §6): the BT platform's own
-   * dedicated credit line at the moment this transfer was initiated —
-   * distinct from the account's purchase open-to-buy (`Account.availableCredit`).
-   * Optional because only Sentinel's BT_INITIATED fixtures carry it; v1
-   * consumers that never read this field are unaffected.
-   */
-  btCreditLineAtInitiation?: number;
 }
 
 export interface StreamEvent {
@@ -76,27 +80,7 @@ export interface StreamEvent {
   accountId: string;
   kind: 'payment.posted' | 'payment.missed' | 'autopay.failed'
       | 'statement.generated' | 'balance_transfer.completed'
-      | 'bt.promo_expiring' | 'transaction.posted'
-      // v2 "Sentinel" addition (brief §5): a new balance transfer being
-      // initiated — the kind Marcus's 02:47 violating event carries. Never
-      // appears in v1's `SeedDb.streamEvents` (reuse-map §5 guardrail); only
-      // in `sentinelReplayEvents`.
-      | 'balance_transfer.initiated';
+      | 'bt.promo_expiring' | 'transaction.posted';
   summary: string;
   timestamp: string;
-}
-
-/**
- * v2 "Sentinel" addition (brief §5): a record that a customer was notified
- * their balance-transfer promotional APR is ending. Backs rule R3
- * ("Customers must be notified at least 45 days before a promotional APR
- * expires.") — a dataset distinct from `BalanceTransferEvent`, which records
- * what happened to the transfer, not what the customer was told.
- */
-export interface PromoNoticeRecord {
-  noticeId: string;
-  accountId: string;
-  sentDate: string; // ISO date
-  promoEndDate: string; // ISO date
-  channel: 'EMAIL';
 }

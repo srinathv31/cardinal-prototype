@@ -1,9 +1,11 @@
 "use client";
 
-// The Sentinel stage shell (v2 brief §4, W0.4 → W1.1 wiring). Three-panel
-// layout plus the audit strip, filling the viewport with no page scroll
-// (brief §1: projected for stakeholders, nothing critical behind hover or
-// below the fold). `Stage` is the ONLY stateful component on this screen —
+// The Sentinel stage shell (brief §4). Three-panel layout plus the audit
+// strip, filling the viewport with no page scroll (brief §1: projected for
+// stakeholders, nothing critical behind hover or below the fold). v3
+// re-points the left panel from the event replay rail to the conversation
+// rail (docs/v3-migration-map.md §4) — everything else about the shell is
+// unchanged. `Stage` is the ONLY stateful component on this screen —
 // it owns the single `ScenarioPlayer` instance and every other component
 // here is a pure renderer of the snapshot it hands down via props (v1
 // invariant 5b — zero business logic in components).
@@ -37,7 +39,7 @@ import type { SentinelScenario, SentinelStageState } from "@/lib/sentinel/scenar
 import type { PolicyDocument } from "@/lib/sentinel/policy";
 import { AuditStrip } from "./audit-strip";
 import { ContextRail } from "./context-rail";
-import { EventReplayRail } from "./event-replay-rail";
+import { ConversationRail } from "./conversation-rail";
 import { LiveAgentGraph } from "./live-agent-graph";
 import { PolicyPanel } from "./policy-panel";
 import { PresenterBar } from "./presenter-bar";
@@ -91,8 +93,8 @@ export function Stage({
     <div className="flex h-[calc(100vh-var(--spacing)*12)] min-h-0 flex-col gap-4">
       <StageHeader status={state.status} act={state.act} />
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,3fr)_minmax(0,6fr)_minmax(320px,4fr)] gap-4">
-        <EventReplayRail
-          events={state.railEvents}
+        <ConversationRail
+          turns={state.conversation}
           counter={state.counter}
           caption={state.counterCaption}
         />
@@ -155,7 +157,7 @@ function StageHeader({ status, act }: { status: SentinelStageState["status"]; ac
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Sentinel</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Policy enforcement over the SOE event stream
+          Authorized-user policy enforcement across the portfolio
         </p>
       </div>
       <span
