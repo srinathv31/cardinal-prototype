@@ -175,3 +175,12 @@ Items grouped with `∥` have disjoint file sets and may run in parallel. **Ever
 ## 10. Path to real (context, not scope — do not build)
 
 After stakeholder review, integration replaces the ScenarioPlayer with a real agent runtime emitting the same stream: tools → real account/transaction APIs; rule store → a real datastore; model → the available internal endpoint; hosting → an internal app service. Because every renderer consumes only the wire contract, **none of this build's UI changes**. Keep that contract clean and documented accordingly — it is the handoff artifact for the integration team.
+
+---
+
+## Addendum v2.1 — judgment beats (post-P4)
+
+Two additions after the P4 gate review, closing the "if-statement wrapper" critique — the demo must show the agent exercising judgment, not only evaluating rules:
+
+- **Act II — the data-gap finding.** The policy carries a sixth section (§Affordability Review) whose obligation — income verification on transfers over $5,000 — is genuinely not evaluable against SOE's datasets. The Policy Analyst extracts four obligations; the Critic validates three and parks the fourth as an explicit data gap. Rendered as a fourth, visually distinct Rule Diff row; activation stays "3 rules." An agent that knows the limits of its own data is the credibility beat, and it plants the expansion story: onboard more data, enforce more policy.
+- **Act III — the decision point.** After the R1 verdict (deterministic and auditable — §eligibility makes cure irrelevant to the verdict), the response is a judgment call. The agent lays out three compliant routes (hold / allow-with-outreach / escalate-only), fires a third Data Collector call (account snapshot + cure check), rejects two routes with recorded reasons — escalate-only dies against Act I's own "Monday 9:00 AM sampling" card — and selects the hold, which still requires human approval. New §9.6 component: `DecisionCard`. The framing this buys on stage: deterministic where auditability matters, generative where judgment matters, a human gate on top of both.

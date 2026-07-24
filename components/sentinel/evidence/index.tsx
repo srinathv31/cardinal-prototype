@@ -5,7 +5,8 @@
 // console-error-never-throw path, demo-safety brief §8); Sentinel-only
 // components (wire-contract §9.6) route here. P4 (W4.2) fulfills the
 // evidence-cards note: `BTEventDetail` and `RuleCitation` join `RuleDiff`
-// below.
+// below. Addendum v2.1 (post-P4) adds `DecisionCard` — Act III's
+// response-routes card — the same way.
 //
 // `OutreachDraftCard` is the one v1 registry member routed HERE instead of
 // delegated: v1's EvidenceRenderer refuses it by design (in v1 it renders
@@ -18,6 +19,7 @@
 import { EvidenceRenderer, OutreachDraftCard } from "@/components/registry";
 import type { SentinelRenderInstruction } from "@/lib/sentinel/registry";
 import { BTEventDetail } from "./bt-event-detail";
+import { DecisionCard } from "./decision-card";
 import { RuleCitation } from "./rule-citation";
 import { RuleDiff } from "./rule-diff";
 
@@ -31,6 +33,8 @@ export function SentinelEvidenceRenderer({
     return <BTEventDetail {...instruction.props} />;
   if (instruction.component === "RuleCitation")
     return <RuleCitation {...instruction.props} />;
+  if (instruction.component === "DecisionCard")
+    return <DecisionCard {...instruction.props} />;
   if (instruction.component === "OutreachDraftCard")
     return <OutreachDraftCard {...instruction.props} />;
   return <EvidenceRenderer instruction={instruction} />;

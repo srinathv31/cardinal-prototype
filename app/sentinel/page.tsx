@@ -44,9 +44,19 @@
 // skips the catch entirely is worse than one that fails loudly at the
 // fetch (brief §5a: the model never invents data; this file doesn't either,
 // it just refuses to guess when the seed doesn't shape up as expected).
+//
+// Addendum v2.1 (post-P4) adds two more unconditional inputs to the same
+// Promise.all: `getAccount(accountId)` — Act III's decision phase renders
+// the account's standing/tenure off it (demo-scenario.ts's `act3-account`
+// MetricRow) — and `policyObligationGap` (`lib/sentinel/policy.ts`), threaded
+// into `buildDemoScenario`'s `policy` param the same way `policyRules`
+// already is: checked-in content, not seed data, so it's a direct import
+// here rather than a lib/soe fetch (this file's earlier P3 comment on
+// `policyDocument`/`policyRules` applies identically).
 
 import { Stage } from "@/components/sentinel/stage";
 import {
+  getAccount,
   getBalanceTransferEvents,
   getPartiesForAccount,
   getPayments,
@@ -54,7 +64,7 @@ import {
 } from "@/lib/soe";
 import { buildDemoScenario } from "@/lib/sentinel/scenario/demo-scenario";
 import { graphRehearsalScenario } from "@/lib/sentinel/scenario/graph-rehearsal";
-import { policyDocument, policyRules } from "@/lib/sentinel/policy";
+import { policyDocument, policyObligationGap, policyRules } from "@/lib/sentinel/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -80,10 +90,11 @@ export default async function SentinelPage({
   }
   const accountId = btReplayEvent.accountId;
 
-  const [payments, balanceTransferEvents, parties] = await Promise.all([
+  const [payments, balanceTransferEvents, parties, account] = await Promise.all([
     getPayments(accountId),
     getBalanceTransferEvents(accountId),
     getPartiesForAccount(accountId),
+    getAccount(accountId),
   ]);
 
   const btEvent = balanceTransferEvents.find((e) => e.timestamp === btReplayEvent.timestamp);
@@ -99,8 +110,8 @@ export default async function SentinelPage({
 
   const scenario = buildDemoScenario({
     replayEvents,
-    policy: { document: policyDocument, rules: policyRules },
-    actIII: { btEvent, payments, partyName },
+    policy: { document: policyDocument, rules: policyRules, obligationGap: policyObligationGap },
+    actIII: { btEvent, payments, partyName, account },
   });
 
   return <Stage scenario={scenario} policyDocument={policyDocument} />;

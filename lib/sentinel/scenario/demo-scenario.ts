@@ -53,24 +53,44 @@
 // render step's same-id replace-in-place semantics (types.ts, wire-contract
 // §9.2) instead of five separate cards.
 //
+// Addendum v2.1 (post-P4, CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum):
+// the policy document now carries a SIXTH section (§Affordability Review),
+// so the Policy Analyst extracts FOUR obligations, not three — but only
+// three ever become rules. The validate phase's render and every render
+// after it append a fourth row, built from `policyObligationGap`
+// (lib/sentinel/policy.ts) via `buildRuleDiff`'s new `withGap` option: the
+// Critic parks the income-verification obligation as a `data-gap` instead
+// of validating it, and `n2-gap` narrates that decision out loud right
+// after the validated card renders. Activation still reads "Activate 3
+// rules" — the gap is parked, not activated, and the arithmetic on the
+// button is the whole point (brief v2 §5's hand-reconcilable rule).
+//
 // Act III (brief §3 Act III, ~2.5 min budget, W4.1/W4.2 mechanics + W4.3
 // wiring): the file no longer ends on the Act III marker — this section
-// appends the catch itself, nine phases, commented inline where each
-// starts — restart (`railReset` + a zeroing `counterUpdate`, brief §3's
-// "same night replays") → replay-to-catch (the 14-event loop again, index-
-// aligned with `ACT_III_EVENT_DELAYS_MS`, brisker than Act I because the
-// audience has already sat through this exact night once) → ignition (the
-// graph wakes the instant the catch event lands, mirroring Act II's
-// working→done idiom with `animatedEdges` replacing wholesale) → two-call
-// collection (Data Collector fires twice — BT event detail, then payment
-// history — the double `graphStep.detail` W4.1 built for exactly this) →
-// verdict (Critic renders both R1 — violation — and R2 — pass — so the
-// catch reads as an eligibility breach, not "everything fails") → gate (a
-// real approval, v1 brief §5d, no different from Act II's) → armed (the
-// same six-node settle Act II uses, same order, `orchestrator` first) →
-// rest-of-night (the loop resumes past the catch, Elena's event carrying
-// `complianceBadge` — R3's compliance-pass beat) → close (the finale
-// counter, `violations` derived the same way Act I's was).
+// appends the catch itself, TEN phases (Addendum v2.1 inserts one — see
+// below), commented inline where each starts — restart (`railReset` + a
+// zeroing `counterUpdate`, brief §3's "same night replays") → replay-to-catch
+// (the 14-event loop again, index-aligned with `ACT_III_EVENT_DELAYS_MS`,
+// brisker than Act I because the audience has already sat through this
+// exact night once) → ignition (the graph wakes the instant the catch event
+// lands, mirroring Act II's working→done idiom with `animatedEdges`
+// replacing wholesale) → two-call collection (Data Collector fires twice —
+// BT event detail, then payment history — the double `graphStep.detail`
+// W4.1 built for exactly this) → verdict (Critic renders both R1 —
+// violation — and R2 — pass — so the catch reads as an eligibility breach,
+// not "everything fails") → **decide** (Addendum v2.1 — the new phase: R1's
+// verdict is deterministic, but the RESPONSE to it is a judgment call. A
+// `DecisionCard` lays out three compliant routes — hold / monitor-and-
+// outreach / escalate-only — all `'considering'`; a THIRD Data Collector
+// call fetches the account snapshot and the cure check; monitor is rejected
+// first, then escalate loses against Act I's own "Monday 9:00 AM sampling"
+// card, and hold is selected — two routes rejected, on the record, before
+// any approval is asked for) → gate (a real approval, v1 brief §5d, no
+// different from Act II's) → armed (the same six-node settle Act II uses,
+// same order, `orchestrator` first) → rest-of-night (the loop resumes past
+// the catch, Elena's event carrying `complianceBadge` — R3's compliance-pass
+// beat) → close (the finale counter, `violations` derived the same way Act
+// I's was).
 //
 // Two structural inversions worth naming because they're the whole point
 // of Act III existing: (1) `counterUpdate.flagged` tracks `violations`
@@ -86,10 +106,10 @@
 // reused for both acts' finales — one fact, hand-reconcilable, cited twice.
 
 import type { EmitEventStep, ScenarioStep, SentinelScenario } from './types';
-import type { BalanceTransferEvent, Payment, StreamEvent } from '@/lib/soe/types';
-import type { PolicyDocument, PolicyRule } from '@/lib/sentinel/policy';
-import type { RuleDiffProps } from '@/lib/sentinel/registry';
-import { formatCurrency, formatDate } from '@/lib/agents/format';
+import type { Account, BalanceTransferEvent, Payment, StreamEvent } from '@/lib/soe/types';
+import type { PolicyDocument, PolicyObligationGap, PolicyRule } from '@/lib/sentinel/policy';
+import type { DecisionCardProps, RuleDiffProps } from '@/lib/sentinel/registry';
+import { formatCurrency, formatDate, formatMonthYear } from '@/lib/agents/format';
 
 /** Per-event pacing for Act I's replay, index-aligned with the 14-event
  * replay log's ascending-timestamp order. Fixed literals only (brief §8:
@@ -206,27 +226,112 @@ function stripRuleIdPrefix(rule: PolicyRule): string {
  * not appear while the Rule Engineer is still drafting). Only R1 carries a
  * `criticNote` in the fixture data, so gating by `withCriticNote` is enough
  * to keep it off R2/R3 without any extra bookkeeping here.
+ *
+ * Addendum v2.1's `withGap` appends a FOURTH row built from
+ * `policy.obligationGap`, marked `evaluability: 'data-gap'` — never counted
+ * in `count` (which stays `1 | 2 | 3`, R1–R3 only) because the gap row isn't
+ * a drafted rule reaching some Nth position in a sequence, it's a separate
+ * fact the Critic surfaces once validation starts. `false` for every
+ * draft-phase render (the Rule Engineer hasn't touched the Critic's finding
+ * yet); `true` from the validated render onward (this file's Act II call
+ * sites below).
  */
 function buildRuleDiff(
-  policy: { document: PolicyDocument; rules: PolicyRule[] },
-  opts: { count: 1 | 2 | 3; validated: boolean; status: 'proposed' | 'active'; withCriticNote: boolean },
+  policy: { document: PolicyDocument; rules: PolicyRule[]; obligationGap: PolicyObligationGap },
+  opts: {
+    count: 1 | 2 | 3;
+    validated: boolean;
+    status: 'proposed' | 'active';
+    withCriticNote: boolean;
+    withGap: boolean;
+  },
 ): RuleDiffProps {
-  const { document, rules } = policy;
+  const { document, rules, obligationGap } = policy;
+  const evaluableRows: RuleDiffProps['rules'] = rules.slice(0, opts.count).map((rule) => ({
+    ruleId: rule.ruleId,
+    title: stripRuleIdPrefix(rule),
+    excerpt: {
+      sectionHeading: sectionHeadingFor(document, rule.excerpt.sectionId),
+      quote: rule.excerpt.quote,
+    },
+    plainEnglish: rule.plainEnglish,
+    machine: rule.machine,
+    validated: opts.validated,
+    criticNote: opts.withCriticNote ? rule.criticNote : undefined,
+    evaluability: 'evaluable',
+  }));
+
+  // The data-gap row: no `machine` footer (nothing was ever drafted into a
+  // machine-readable rule), never `validated` (there was nothing evaluable
+  // to validate), and `criticNote` carries the Critic's reason for parking
+  // it — always present when the row is shown, unlike the evaluable rows'
+  // optional note.
+  const gapRow: RuleDiffProps['rules'][number] = {
+    ruleId: obligationGap.obligationId,
+    title: obligationGap.title,
+    excerpt: {
+      sectionHeading: sectionHeadingFor(document, obligationGap.excerpt.sectionId),
+      quote: obligationGap.excerpt.quote,
+    },
+    plainEnglish: obligationGap.plainEnglish,
+    validated: false,
+    criticNote: obligationGap.criticNote,
+    evaluability: 'data-gap',
+  };
+
   return {
     title: RULE_DIFF_TITLE,
     status: opts.status,
-    rules: rules.slice(0, opts.count).map((rule) => ({
-      ruleId: rule.ruleId,
-      title: stripRuleIdPrefix(rule),
-      excerpt: {
-        sectionHeading: sectionHeadingFor(document, rule.excerpt.sectionId),
-        quote: rule.excerpt.quote,
-      },
-      plainEnglish: rule.plainEnglish,
-      machine: rule.machine,
-      validated: opts.validated,
-      criticNote: opts.withCriticNote ? rule.criticNote : undefined,
+    rules: opts.withGap ? [...evaluableRows, gapRow] : evaluableRows,
+  };
+}
+
+/** Act III decide phase (Addendum v2.1): each response route's fixed
+ * label/summary — editorial copy, not derived from any dataset, so it lives
+ * as a constant rather than being rebuilt inline at every one of
+ * `buildDecisionCard`'s three call sites below. */
+const DECISION_ROUTE_COPY = {
+  hold: {
+    label: 'Hold the transfer for review',
+    summary: 'Pause posting while eligibility is reviewed; reversible.',
+  },
+  monitor: {
+    label: 'Allow with flag + customer outreach',
+    summary: 'Let the transfer post, flag the account, draft customer outreach.',
+  },
+  escalate: {
+    label: 'Escalate to ops review queue',
+    summary: 'Refer to servicing ops without holding the transfer.',
+  },
+} as const;
+
+type DecisionRouteId = keyof typeof DECISION_ROUTE_COPY;
+type DecisionOptionState = { status: DecisionCardProps['options'][number]['status']; rationale?: string };
+
+/**
+ * Builds the `act3-decision` card's props at one of the decide phase's
+ * three re-renders (header comment) — hold/monitor/escalate's per-render
+ * `status`/`rationale`, everything else (label, summary, title, subtitle,
+ * footnote) fixed editorial copy from `DECISION_ROUTE_COPY`. `options` is
+ * assembled in the SAME fixed order (hold, monitor, escalate) on every
+ * call, never sorted or grouped by `status` — registry.ts's `DecisionCard`
+ * doc comment requires this: the card must read as the same three rows
+ * progressively resolving under the same `render` id, not a reshuffled
+ * list.
+ */
+function buildDecisionCard(routes: Record<DecisionRouteId, DecisionOptionState>): DecisionCardProps {
+  const routeIds: DecisionRouteId[] = ['hold', 'monitor', 'escalate'];
+  return {
+    title: 'Response to R1 violation',
+    subtitle: 'The verdict is deterministic. The response is a judgment call.',
+    options: routeIds.map((id) => ({
+      id,
+      label: DECISION_ROUTE_COPY[id].label,
+      summary: DECISION_ROUTE_COPY[id].summary,
+      status: routes[id].status,
+      rationale: routes[id].rationale,
     })),
+    footnote: 'Whichever route is selected requires human approval before anything executes.',
   };
 }
 
@@ -235,16 +340,20 @@ function buildRuleDiff(
  * finish, then Act II's policy-to-production sequence, then Act III's
  * investigation and catch — `steps` now ends on Act III's closing
  * narration, not on its marker (this file's header comment has the full
- * nine-phase breakdown). `actIII` is required, not optional: the demo path
+ * ten-phase breakdown). `actIII` is required, not optional: the demo path
  * always has this data (app/sentinel/page.tsx's sole call site fetches it
  * unconditionally), and making it required here means a missing fetch
  * fails at the call site's type-check rather than silently dropping Act III
- * at runtime.
+ * at runtime. Addendum v2.1 widens `policy` with `obligationGap` (Act II's
+ * data-gap row) and `actIII` with `account` (the decision phase's account
+ * snapshot) — both required for the same reason: the demo path always has
+ * them, so a missing fetch should fail loudly at the call site instead of
+ * silently dropping a beat at runtime.
  */
 export function buildDemoScenario(data: {
   replayEvents: StreamEvent[];
-  policy: { document: PolicyDocument; rules: PolicyRule[] };
-  actIII: { btEvent: BalanceTransferEvent; payments: Payment[]; partyName: string };
+  policy: { document: PolicyDocument; rules: PolicyRule[]; obligationGap: PolicyObligationGap };
+  actIII: { btEvent: BalanceTransferEvent; payments: Payment[]; partyName: string; account: Account };
 }): SentinelScenario {
   const { replayEvents, policy } = data;
 
@@ -312,7 +421,7 @@ export function buildDemoScenario(data: {
     type: 'narration',
     delayMs: 400,
     id: 'n2-intake',
-    text: 'BT-Servicing-Policy-2026 received — five sections. Routing to Policy Analyst for obligation extraction.',
+    text: 'BT-Servicing-Policy-2026 received — six sections. Routing to Policy Analyst for obligation extraction.',
   });
 
   // Phase: parse — Policy Analyst reads every section and extracts the
@@ -329,7 +438,7 @@ export function buildDemoScenario(data: {
     delayMs: 900,
     id: 'n2-read',
     text:
-      'Reading §Purpose and Scope, §Definitions, §New Transfer Eligibility, §Transfer Sizing Limits, §Promotional Rate Disclosures. Three enforceable obligations found.',
+      'Reading §Purpose and Scope, §Definitions, §New Transfer Eligibility, §Transfer Sizing Limits, §Affordability Review, §Promotional Rate Disclosures. Four obligations found.',
   });
   steps.push({
     type: 'auditWrite',
@@ -341,8 +450,8 @@ export function buildDemoScenario(data: {
       toolName: 'extract_obligations',
       kind: 'step.completed',
       actor: 'agent',
-      inputSummary: 'BT-Servicing-Policy-2026 · 5 sections',
-      outputSummary: '3 enforceable obligations extracted',
+      inputSummary: 'BT-Servicing-Policy-2026 · 6 sections',
+      outputSummary: '4 obligations extracted',
     },
   });
   // Drawer slides away; the rail beneath already holds the narration.
@@ -370,7 +479,13 @@ export function buildDemoScenario(data: {
     id: 'rule-diff',
     instruction: {
       component: 'RuleDiff',
-      props: buildRuleDiff(policy, { count: 1, validated: false, status: 'proposed', withCriticNote: false }),
+      props: buildRuleDiff(policy, {
+        count: 1,
+        validated: false,
+        status: 'proposed',
+        withCriticNote: false,
+        withGap: false,
+      }),
     },
   });
   steps.push({
@@ -379,7 +494,13 @@ export function buildDemoScenario(data: {
     id: 'rule-diff',
     instruction: {
       component: 'RuleDiff',
-      props: buildRuleDiff(policy, { count: 2, validated: false, status: 'proposed', withCriticNote: false }),
+      props: buildRuleDiff(policy, {
+        count: 2,
+        validated: false,
+        status: 'proposed',
+        withCriticNote: false,
+        withGap: false,
+      }),
     },
   });
   steps.push({
@@ -388,7 +509,13 @@ export function buildDemoScenario(data: {
     id: 'rule-diff',
     instruction: {
       component: 'RuleDiff',
-      props: buildRuleDiff(policy, { count: 3, validated: false, status: 'proposed', withCriticNote: false }),
+      props: buildRuleDiff(policy, {
+        count: 3,
+        validated: false,
+        status: 'proposed',
+        withCriticNote: false,
+        withGap: false,
+      }),
     },
   });
   steps.push({
@@ -401,7 +528,7 @@ export function buildDemoScenario(data: {
       toolName: 'draft_rules',
       kind: 'tool.executed',
       actor: 'agent',
-      inputSummary: '3 obligations from BT-Servicing-Policy-2026',
+      inputSummary: '4 obligations from BT-Servicing-Policy-2026',
       outputSummary: 'Rules R1, R2, R3 drafted',
     },
   });
@@ -429,8 +556,26 @@ export function buildDemoScenario(data: {
     id: 'rule-diff',
     instruction: {
       component: 'RuleDiff',
-      props: buildRuleDiff(policy, { count: 3, validated: true, status: 'proposed', withCriticNote: true }),
+      props: buildRuleDiff(policy, {
+        count: 3,
+        validated: true,
+        status: 'proposed',
+        withCriticNote: true,
+        withGap: true,
+      }),
     },
+  });
+  // Addendum v2.1: the fourth obligation — income verification on large
+  // transfers — is genuinely not evaluable against SOE's current datasets.
+  // Narrated right after the validated card renders (the gap row is on
+  // screen by the time the audience hears about it) and before the audit
+  // write below records the same fact.
+  steps.push({
+    type: 'narration',
+    delayMs: 400,
+    id: 'n2-gap',
+    text:
+      'Three rules are evaluable today. The fourth obligation — income verification on large transfers — needs data SOE does not hold. Parked as a data gap, not activated.',
   });
   steps.push({
     type: 'auditWrite',
@@ -442,8 +587,8 @@ export function buildDemoScenario(data: {
       toolName: 'validate_rules',
       kind: 'step.completed',
       actor: 'agent',
-      inputSummary: 'R1, R2, R3 against SOE data fields',
-      outputSummary: '3 of 3 rules evaluable with current SOE data',
+      inputSummary: 'R1, R2, R3 + income-verification obligation vs SOE data fields',
+      outputSummary: '3 of 4 evaluable — 1 data gap (income verification not onboarded)',
     },
   });
   steps.push({
@@ -472,8 +617,8 @@ export function buildDemoScenario(data: {
       description:
         'R1, R2 and R3 begin evaluating every event on the SOE stream the moment you approve.',
       rationale:
-        'All three rules passed critic validation as evaluable with current SOE data. Activation only observes and flags — no customer-facing action happens without a separate approval.',
-      evidence: ['Rule Diff — BT-Servicing-Policy-2026'],
+        'Three of the four extracted obligations passed critic validation as evaluable with current SOE data; the income-verification obligation is parked as a data gap until that dataset is onboarded. Activation only observes and flags — no customer-facing action happens without a separate approval.',
+      evidence: ['Rule Diff — BT-Servicing-Policy-2026', 'Data gap — income verification (not onboarded)'],
     },
     audit: {
       runId: RUN_ID,
@@ -490,7 +635,13 @@ export function buildDemoScenario(data: {
     id: 'rule-diff',
     instruction: {
       component: 'RuleDiff',
-      props: buildRuleDiff(policy, { count: 3, validated: true, status: 'active', withCriticNote: true }),
+      props: buildRuleDiff(policy, {
+        count: 3,
+        validated: true,
+        status: 'active',
+        withCriticNote: true,
+        withGap: true,
+      }),
     },
   });
   steps.push({
@@ -560,17 +711,32 @@ export function buildDemoScenario(data: {
   steps.push({ type: 'actMarker', act: 3, title: 'Act III — The catch' });
 
   // ---------------------------------------------------------------------
-  // Act III — The catch (brief §3 Act III). Nine phases (file header):
-  // restart → replay-to-catch → ignition → two-call collection → verdict →
-  // gate → armed → rest-of-night → close.
+  // Act III — The catch (brief §3 Act III). Ten phases (file header,
+  // Addendum v2.1): restart → replay-to-catch → ignition → two-call
+  // collection → verdict → decide → gate → armed → rest-of-night → close.
   // ---------------------------------------------------------------------
 
-  const { btEvent, payments, partyName } = data.actIII;
+  const { btEvent, payments, partyName, account } = data.actIII;
   const accountId = btEvent.accountId;
 
   const missedPayment = payments.find((p) => p.status === 'MISSED');
   if (!missedPayment) {
     throw new Error('buildDemoScenario: Act III requires a MISSED payment in actIII.payments');
+  }
+  // Addendum v2.1: the decision phase's `n3-account` narration claims "no
+  // payment has posted since the [missed] due date" — the account-standing
+  // half of the cure check. That claim must be hand-reconcilable against
+  // the data behind it, never asserted blind (brief v2 §5), so it's a
+  // throw-on-bad-fixture guard, matching this file's other Act III guards
+  // (missing MISSED payment, missing `btCreditLineAtInitiation`, missing
+  // catch/Elena events) rather than a silent assumption. Date-only ISO
+  // strings (YYYY-MM-DD) compare correctly with `>` lexicographically.
+  for (const payment of payments) {
+    if (payment.postedDate !== undefined && payment.postedDate > missedPayment.dueDate) {
+      throw new Error(
+        `buildDemoScenario: Act III's "no payment posted since" narration is contradicted by ${payment.paymentId} (posted ${payment.postedDate}, after the missed due date ${missedPayment.dueDate})`,
+      );
+    }
   }
   const daysBeforeInitiation = wholeDaysBetween(missedPayment.dueDate, btEvent.timestamp);
 
@@ -604,6 +770,11 @@ export function buildDemoScenario(data: {
   const transferAmountFmt = formatCurrency(btEvent.transferAmount);
   const missedMinimumFmt = formatCurrency(missedPayment.minimumDue);
   const missedDueDateFmt = formatDate(missedPayment.dueDate);
+  // Addendum v2.1: the decision phase's account-snapshot MetricRow
+  // ("Customer since") — `formatMonthYear`, the same helper
+  // `PartyGraph.account.detail`'s doc comment illustrates ("Open since Aug
+  // 2018"), not a fresh date-formatting convention invented here.
+  const customerSinceFmt = formatMonthYear(account.openedDate);
 
   // Phase: replay restart — a fresh observation window. Without `railReset`
   // the rail would carry Act I's 14 cards plus Act III's 14 more (types.ts's
@@ -912,6 +1083,180 @@ export function buildDemoScenario(data: {
       delayMs: 300,
       nodeId: 'critic',
       nodeState: 'done',
+      // Addendum v2.1: the gate edge no longer lights here — R1's verdict
+      // is in, but nothing routes to the Approval Gate until the decide
+      // phase below actually picks a route. Clearing the animated set
+      // wholesale (types.ts's `GraphStep.detail`-adjacent doc comment on
+      // `animatedEdges`) leaves the graph edge-quiet through the decision
+      // beat rather than pointing at the gate prematurely.
+      animatedEdges: [],
+    });
+
+    // ---------------------------------------------------------------
+    // Phase: decide (Addendum v2.1, CARDINAL_V2_SENTINEL_BRIEF.md's
+    // closing addendum) — R1's verdict is deterministic; the RESPONSE to
+    // it is a judgment call. Three compliant routes go on screen at once,
+    // all `'considering'`, then resolve one at a time as a THIRD Data
+    // Collector call (the account snapshot + cure check) comes back —
+    // monitor rejected first, then escalate loses against Act I's own
+    // "Monday 9:00 AM sampling" card (context-rail.tsx's
+    // `ManualReviewCard`), then hold is selected. Two rejections, on the
+    // record, before any approval is asked for.
+    // ---------------------------------------------------------------
+    steps.push({
+      type: 'narration',
+      delayMs: 350,
+      id: 'n3-routes',
+      text:
+        "R1's verdict is deterministic — the transfer is ineligible either way. The response is a judgment call: three compliant routes are open. Weighing them against the account picture.",
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 800,
+      id: 'act3-decision',
+      instruction: {
+        component: 'DecisionCard',
+        props: buildDecisionCard({
+          hold: { status: 'considering' },
+          monitor: { status: 'considering' },
+          escalate: { status: 'considering' },
+        }),
+      },
+    });
+
+    // Third Data Collector call — the account snapshot + cure check
+    // (mirrors calls 1/2's `graphStep.detail` idiom above; call 2 already
+    // ended on a `done` graphStep, so this `working` step alone reads as a
+    // distinct third firing).
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'data-collector',
+      nodeState: 'working',
+      detail: 'call 3 · account snapshot',
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 400,
+      id: 'n3-account',
+      text: `Third call: the account picture. Checking standing, tenure — and whether the missed payment was later cured. No payment has posted since the ${missedDueDateFmt} due date; the miss stands.`,
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 700,
+      id: 'act3-account',
+      instruction: {
+        component: 'MetricRow',
+        props: {
+          metrics: [
+            { label: 'Account standing', value: account.status, tone: 'neutral' },
+            { label: 'Customer since', value: customerSinceFmt, tone: 'neutral' },
+            { label: `Payment since ${missedDueDateFmt}`, value: 'None', tone: 'critical' },
+          ],
+        },
+      },
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 400,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-data-collector',
+        step: 4,
+        toolName: 'fetch_account_snapshot',
+        kind: 'tool.executed',
+        actor: 'agent',
+        inputSummary: `${accountId} snapshot + cure check`,
+        outputSummary: `Standing ${account.status} · no payment posted since ${missedDueDateFmt}`,
+      },
+    });
+    steps.push({ type: 'graphStep', delayMs: 400, nodeId: 'data-collector', nodeState: 'done' });
+
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'orchestrator',
+      nodeState: 'working',
+      detail: 'weighing 3 response routes',
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 800,
+      id: 'act3-decision',
+      instruction: {
+        component: 'DecisionCard',
+        props: buildDecisionCard({
+          hold: { status: 'considering' },
+          monitor: {
+            status: 'rejected',
+            rationale:
+              'The miss stands uncured — allowing the transfer completes an ineligible transaction that is hard to unwind once posted.',
+          },
+          escalate: { status: 'considering' },
+        }),
+      },
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 900,
+      id: 'act3-decision',
+      instruction: {
+        component: 'DecisionCard',
+        props: buildDecisionCard({
+          hold: {
+            status: 'selected',
+            rationale:
+              "Reversible, blocks tonight's posting, and preserves the customer's request while eligibility is reviewed.",
+          },
+          monitor: {
+            status: 'rejected',
+            rationale:
+              'The miss stands uncured — allowing the transfer completes an ineligible transaction that is hard to unwind once posted.',
+          },
+          escalate: {
+            status: 'rejected',
+            rationale:
+              'Next scheduled ops sampling is Monday 9:00 AM, business hours only — the transfer posts tonight, days before a human would see the queue.',
+          },
+        }),
+      },
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 350,
+      id: 'n3-choice',
+      text: 'Hold selected over monitor-and-outreach and escalate-only. Two routes rejected, with reasons, on the record.',
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 500,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-orchestrator',
+        step: 5,
+        toolName: 'select_response',
+        kind: 'step.completed',
+        actor: 'agent',
+        inputSummary: '3 candidate routes vs account snapshot + cure status',
+        outputSummary: 'Hold selected — monitor and escalate rejected with recorded reasons',
+      },
+    });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'orchestrator',
+      nodeState: 'working',
+      // `detail` omitted — clears the "weighing 3 response routes" caption
+      // back to the plain state word (types.ts's `GraphStep.detail` doc
+      // comment: absence clears wholesale, it doesn't leave the old text
+      // stuck). `critic` → `approval-gate`, not `orchestrator` →
+      // `approval-gate`: that pair isn't in `STATIC_EDGES`
+      // (live-agent-graph.tsx), and orchestrator/approval-gate sit at
+      // opposite ends of the fixed vertical layout — a non-catalog edge
+      // between them would cut straight through the policy-analyst and
+      // critic nodes. The already-lit `critic`→`approval-gate` catalog
+      // edge reads cleanly and still lands the gate lighting up the
+      // instant the decision is made.
       animatedEdges: [{ from: 'critic', to: 'approval-gate' }],
     });
 
@@ -921,7 +1266,8 @@ export function buildDemoScenario(data: {
       type: 'narration',
       delayMs: 350,
       id: 'n3-proposal',
-      text: 'Proposed action: hold the transfer for review, notify servicing ops, file the case summary. Nothing executes without approval.',
+      text:
+        'Proposed action — the selected route: hold the transfer for review, notify servicing ops, file the case summary. Nothing executes without approval.',
     });
     steps.push({
       type: 'render',
@@ -961,18 +1307,19 @@ export function buildDemoScenario(data: {
         title: 'Hold balance transfer for review',
         description: `Place a servicing hold on the ${transferAmountFmt} transfer on ${accountId} and send the ops notification. The transfer does not post while the hold is active.`,
         rationale:
-          "R1 violation confirmed across two datasets; R2 sizing passes. A hold is reversible and preserves the customer's request while eligibility is reviewed.",
+          "R1 violation confirmed across two datasets; R2 sizing passes. Hold selected over two rejected routes — reversible, and it preserves the customer's request while eligibility is reviewed.",
         evidence: [
           'BT event detail',
           'Payment history — 60-day look-back',
           'Rule R1 citation — violation',
           'Rule R2 check — pass',
+          'Decision record — 3 response routes weighed',
         ],
       },
       audit: {
         runId: ACT_III_RUN_ID,
         agentId: 'sentinel-approval-gate',
-        step: 4,
+        step: 6,
         toolName: 'hold_balance_transfer',
         inputSummary: `Hold ${transferAmountFmt} transfer on ${accountId} + notify ops`,
         outputSummary: 'Human decision recorded at the enforcement gate',
@@ -991,7 +1338,7 @@ export function buildDemoScenario(data: {
       entry: {
         runId: ACT_III_RUN_ID,
         agentId: 'sentinel-orchestrator',
-        step: 5,
+        step: 7,
         toolName: 'hold_balance_transfer',
         kind: 'action.executed',
         actor: 'agent',

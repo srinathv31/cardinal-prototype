@@ -485,8 +485,15 @@ type SentinelRenderInstruction =
   | RenderInstruction
   | { component: 'RuleDiff'; props: RuleDiffProps }
   | { component: 'BTEventDetail'; props: BTEventDetailProps }
-  | { component: 'RuleCitation'; props: RuleCitationProps };
+  | { component: 'RuleCitation'; props: RuleCitationProps }
+  | { component: 'DecisionCard'; props: DecisionCardProps };
 ```
+
+**Addendum v2.1** (post-P4, CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum)
+widens `RuleDiff` (below) and adds `DecisionCard` (further below) — both
+purely additive: every `RuleDiffProps` value that validated before this
+addendum still validates unchanged, and `DecisionCard` is a new union member,
+not a change to an existing one.
 
 `lib/sentinel/registry.ts` is a separate, additive component namespace, not a
 change to `lib/registry/schemas.ts` — v1's registry (§3, §5c) is untouched;
@@ -501,18 +508,19 @@ parsed into enforceable rules:
 |---|---|---|
 | `title` | `string` | e.g. "BT-Servicing-Policy-2026 → extracted rules". |
 | `status` | `'proposed' \| 'active'` | `proposed` before the ApprovalCard resolves, `active` once approved. Set by the scenario step, never inferred client-side. |
-| `rules[].ruleId` | `string` | e.g. "R1". |
+| `rules[].ruleId` | `string` | e.g. "R1" (or the obligation id, e.g. "O4", for a `data-gap` row — Addendum v2.1). |
 | `rules[].title` | `string` | |
 | `rules[].excerpt.sectionHeading` | `string` | e.g. "New Transfer Eligibility". |
 | `rules[].excerpt.quote` | `string` | Verbatim substring of the policy document — cited, not paraphrased. |
 | `rules[].plainEnglish` | `string` | Model-authored restatement (editorial content, §5a). |
-| `rules[].machine.ruleId` | `string` | Machine-readable footer. |
-| `rules[].machine.datasetsTouched` | `string[]` | |
-| `rules[].machine.evaluationTrigger` | `string` | |
-| `rules[].criticNote?` | `string` | Optional — the critic's evaluability note, e.g. "Evaluable with current SOE data: payments + balance-transfer events." |
-| `rules[].validated` | `boolean` | Critic-pass flag, set by the scenario step, never derived client-side. |
+| `rules[].machine?` | `{ ruleId, datasetsTouched: string[], evaluationTrigger }` | Machine-readable footer. **Addendum v2.1: optional.** Absent on a `data-gap` row — nothing was ever drafted into a machine-readable rule, so there is no footer to show; the renderer's absent-footer branch is how the audience SEES that, not just reads it in a caption. |
+| `rules[].criticNote?` | `string` | Optional — the critic's evaluability note, e.g. "Evaluable with current SOE data: payments + balance-transfer events." For a `data-gap` row this is instead the Critic's reason the obligation is parked, and it is always present on that row. |
+| `rules[].validated` | `boolean` | Critic-pass flag, set by the scenario step, never derived client-side. A `data-gap` row is always `false` — there was nothing evaluable to validate. |
+| `rules[].evaluability` | `'evaluable' \| 'data-gap'` | **Addendum v2.1, additive.** Defaults to `'evaluable'` (R1–R3's kind: a normal drafted rule). `'data-gap'` marks an obligation the Policy Analyst extracted but the Critic could not evaluate against current SOE data. Set by the scenario step, never inferred client-side from `machine`'s presence or `validated`'s value. |
 
-`rules` holds 1–3 entries (brief §5: the three extracted rules R1–R3).
+`rules` holds 1–4 entries (**Addendum v2.1** widens this from 1–3: the three
+extracted rules R1–R3, plus at most one `data-gap` row for an obligation the
+Critic parked instead of validating).
 
 **`BTEventDetail`** (Act III, brief §3 beat 2) — the hero evidence card for
 the balance-transfer event under investigation ("$3,200 initiated 02:47").
@@ -544,6 +552,32 @@ verdicts: R1's violation (both conditions ✓✓) and R2's clean pass.
 | `checks[].met` | `boolean` | Condition-evaluation flag — scripted, never computed by the renderer. |
 
 `checks` holds 1–4 entries.
+
+**`DecisionCard`** (Act III, **Addendum v2.1**, additive — post-P4,
+CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum) — the stacked-options card
+that makes the agent's post-verdict JUDGMENT visible. R1's verdict
+(`RuleCitation` above) is deterministic and stays that way; this card is the
+different thing that happens next: laying out the compliant response routes,
+then resolving them one at a time as the investigation gathers more evidence
+(the account snapshot + cure check).
+
+| Field | Type | Notes |
+|---|---|---|
+| `title` | `string` | e.g. "Response to R1 violation". |
+| `subtitle?` | `string` | Optional framing line, e.g. "The verdict is deterministic. The response is a judgment call." |
+| `options[].id` | `string` | Stable route id, e.g. `'hold'` \| `'monitor'` \| `'escalate'` — also the render key, so it stays identical across same-id re-renders. |
+| `options[].label` | `string` | |
+| `options[].summary` | `string` | One-line description of the route, e.g. "Pause posting while eligibility is reviewed; reversible." |
+| `options[].status` | `'considering' \| 'selected' \| 'rejected'` | Set by the scenario step at each `render`, NEVER derived client-side from `rationale` or from the other options' statuses — the same invariant `RuleCitation.verdict` carries above (§5a/§5b: the renderer holds no judgment logic of its own). |
+| `options[].rationale?` | `string` | Why this route was selected or rejected — present once a route leaves `'considering'`, so rejections are "on the record," not a silent status flip. |
+| `footnote?` | `string` | Small print at the card's foot, e.g. "Whichever route is selected requires human approval before anything executes." |
+
+`options` holds 2–4 entries. The demo scenario re-renders this card multiple
+times under the SAME `render` id (§9.1's same-id replace-in-place semantics)
+as the investigation narrows the routes down — all `'considering'`, then one
+rejected, then the final resolution — and `options` is emitted in the SAME
+order on every re-render: the card must read as the same routes
+progressively resolving, never a reshuffled list.
 
 One reuse nuance: on the Sentinel stream, **`OutreachDraftCard` is a legal
 `render` payload** (Act III's scripted ops-notification draft), even though

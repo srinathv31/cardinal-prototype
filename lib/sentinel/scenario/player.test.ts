@@ -543,6 +543,11 @@ describe('ScenarioPlayer — same-id render replacement', () => {
                   evaluationTrigger: 'balance_transfer.initiated',
                 },
                 validated: false,
+                // Addendum v2.1 (lib/sentinel/registry.ts): `evaluability`
+                // has no runtime default outside an actual zod `.parse()`
+                // call, so a hand-built fixture object must set it
+                // explicitly — this is a normal drafted rule, not a gap row.
+                evaluability: 'evaluable',
               },
             ],
           },
@@ -579,6 +584,7 @@ describe('ScenarioPlayer — same-id render replacement', () => {
                   evaluationTrigger: 'balance_transfer.initiated',
                 },
                 validated: true,
+                evaluability: 'evaluable',
               },
             ],
           },

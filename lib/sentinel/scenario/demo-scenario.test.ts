@@ -18,7 +18,7 @@ import { formatCurrency } from '@/lib/agents/format';
 import { buildMarcus } from '@/lib/soe/seed/marcus';
 import { buildSentinelMarcusBt, buildSentinelReplayLog } from '@/lib/soe/seed/sentinel';
 import type { Payment } from '@/lib/soe/types';
-import { policyDocument, policyRules } from '@/lib/sentinel/policy';
+import { policyDocument, policyObligationGap, policyRules } from '@/lib/sentinel/policy';
 import { buildDemoScenario } from './demo-scenario';
 import { ScenarioPlayer } from './player';
 import { SENTINEL_NODE_IDS } from './types';
@@ -29,6 +29,7 @@ import type {
   CounterUpdateStep,
   EmitEventStep,
   GraphStep,
+  NarrationStep,
   PolicyPanelStep,
   RenderStep,
   SentinelScenario,
@@ -44,7 +45,7 @@ afterEach(() => {
 
 const ANCHOR = new Date('2026-08-05T00:00:00.000Z');
 const FINALE_CAPTION = 'Detected day 4 by manual sampling — if at all.';
-const POLICY = { document: policyDocument, rules: policyRules };
+const POLICY = { document: policyDocument, rules: policyRules, obligationGap: policyObligationGap };
 
 /** Adapter's `getPayments` sort (lib/soe/adapter.ts), reproduced here on the
  * direct seed-builder import so the test fixture matches what the real
@@ -62,6 +63,12 @@ const ACT_III_FIXTURE = {
   btEvent: buildSentinelMarcusBt(ANCHOR),
   payments: sortPaymentsDescending(buildMarcus(ANCHOR).payments),
   partyName: 'Marcus Webb',
+  // Addendum v2.1: the decision phase's account-snapshot MetricRow reads
+  // `account.status`/`account.openedDate` — same seed builder demo-
+  // scenario.ts's real call site (app/sentinel/page.tsx) resolves through
+  // `getAccount(accountId)`, imported directly here per this file's stated
+  // convention (direct seed-builder imports in tests).
+  account: buildMarcus(ANCHOR).account,
 };
 
 function buildScenario(): SentinelScenario {
@@ -193,6 +200,17 @@ describe('Act II — structure', () => {
     expect(panelSteps.map((s) => s.panel)).toEqual(['drop', 'preview', 'closed']);
   });
 
+  // Addendum v2.1: the policy document now carries a sixth section, so the
+  // Policy Analyst's read-out narrates four obligations found, not three.
+  it("the parse phase's narration counts four obligations, not three", () => {
+    const n2Read = actTwoSteps.find(
+      (s): s is NarrationStep => s.type === 'narration' && s.id === 'n2-read',
+    );
+    expect(n2Read).toBeDefined();
+    expect(n2Read!.text).toContain('Four obligations');
+    expect(n2Read!.text).toContain('§Affordability Review');
+  });
+
   it('gates the file-drop on exactly one awaitStageAction, before any Act II graphStep', () => {
     const stageActionSteps = actTwoSteps.filter((s): s is AwaitStageActionStep => s.type === 'awaitStageAction');
     expect(stageActionSteps).toHaveLength(1);
@@ -204,7 +222,7 @@ describe('Act II — structure', () => {
     expect(stageActionIndex).toBeLessThan(firstGraphStepIndex);
   });
 
-  it('renders the rule-diff card five times, growing 1 → 2 → 3 rules, validating, then flipping active', () => {
+  it('renders the rule-diff card five times, growing 1 → 2 → 3 rules, validating (plus the data-gap row), then flipping active', () => {
     const renderSteps = actTwoSteps.filter((s): s is RenderStep => s.type === 'render' && s.id === 'rule-diff');
     expect(renderSteps).toHaveLength(5);
 
@@ -213,12 +231,36 @@ describe('Act II — structure', () => {
       return s.instruction.props;
     });
 
-    expect(ruleDiffs.map((d) => d.rules.length)).toEqual([1, 2, 3, 3, 3]);
+    // Addendum v2.1: the validated and active renders carry a FOURTH row —
+    // the data-gap obligation — so row counts are [1, 2, 3, 4, 4], not
+    // [1, 2, 3, 3, 3]. `validated` is checked per-row below (not via
+    // `.every()`, which the gap row's `validated: false` would fail even on
+    // the validated/active renders, correctly — a data-gap row was never
+    // evaluable, so it's never validated).
+    expect(ruleDiffs.map((d) => d.rules.length)).toEqual([1, 2, 3, 4, 4]);
     expect(ruleDiffs.map((d) => d.status)).toEqual(['proposed', 'proposed', 'proposed', 'proposed', 'active']);
-    expect(ruleDiffs.map((d) => d.rules.every((r) => r.validated))).toEqual([false, false, false, true, true]);
+
+    const evaluableValidated = ruleDiffs.map((d) =>
+      d.rules.filter((r) => r.evaluability === 'evaluable').every((r) => r.validated),
+    );
+    expect(evaluableValidated).toEqual([false, false, false, true, true]);
+
+    // The gap row is present from the validated render onward, never
+    // validated, and carries no machine footer.
+    ruleDiffs.forEach((diff, i) => {
+      const gapRow = diff.rules.find((r) => r.evaluability === 'data-gap');
+      if (i < 3) {
+        expect(gapRow).toBeUndefined();
+      } else {
+        expect(gapRow).toBeDefined();
+        expect(gapRow!.validated).toBe(false);
+        expect(gapRow!.machine).toBeUndefined();
+        expect(gapRow!.criticNote).toBe(policyObligationGap.criticNote);
+      }
+    });
   });
 
-  it('keeps the critic note off every card until validation, and even then only on R1', () => {
+  it('keeps the critic note off every evaluable card until validation, and even then only on R1', () => {
     const renderSteps = actTwoSteps.filter((s): s is RenderStep => s.type === 'render' && s.id === 'rule-diff');
     const ruleDiffs = renderSteps.map((s) => {
       if (s.instruction.component !== 'RuleDiff') throw new Error('expected a RuleDiff render step');
@@ -227,23 +269,35 @@ describe('Act II — structure', () => {
 
     ruleDiffs.forEach((diff, i) => {
       const hasCriticNote = i >= 3; // the last two renders — post-validation
-      const r1 = diff.rules.find((r) => r.ruleId === 'R1');
-      const rest = diff.rules.filter((r) => r.ruleId !== 'R1');
+      const evaluableRows = diff.rules.filter((r) => r.evaluability === 'evaluable');
+      const r1 = evaluableRows.find((r) => r.ruleId === 'R1');
+      const rest = evaluableRows.filter((r) => r.ruleId !== 'R1');
 
       expect(r1?.criticNote).toBe(hasCriticNote ? policyRules[0].criticNote : undefined);
       for (const rule of rest) expect(rule.criticNote).toBeUndefined();
     });
   });
 
-  it('cites every rule verbatim — the excerpt quote always matches the policyRules fixture exactly', () => {
+  it('cites every evaluable rule verbatim — the excerpt quote always matches the policyRules fixture exactly', () => {
     const renderSteps = actTwoSteps.filter((s): s is RenderStep => s.type === 'render' && s.id === 'rule-diff');
     for (const step of renderSteps) {
       if (step.instruction.component !== 'RuleDiff') throw new Error('expected a RuleDiff render step');
-      for (const rule of step.instruction.props.rules) {
+      for (const rule of step.instruction.props.rules.filter((r) => r.evaluability === 'evaluable')) {
         const fixture = policyRules.find((r) => r.ruleId === rule.ruleId);
         expect(fixture).toBeDefined();
         expect(rule.excerpt.quote).toBe(fixture!.excerpt.quote);
       }
+    }
+  });
+
+  it("cites the data-gap row's excerpt verbatim against policyObligationGap", () => {
+    const renderSteps = actTwoSteps.filter((s): s is RenderStep => s.type === 'render' && s.id === 'rule-diff');
+    for (const step of renderSteps) {
+      if (step.instruction.component !== 'RuleDiff') throw new Error('expected a RuleDiff render step');
+      const gapRow = step.instruction.props.rules.find((r) => r.evaluability === 'data-gap');
+      if (!gapRow) continue; // draft-phase renders carry no gap row yet
+      expect(gapRow.excerpt.quote).toBe(policyObligationGap.excerpt.quote);
+      expect(gapRow.ruleId).toBe(policyObligationGap.obligationId);
     }
   });
 
@@ -300,7 +354,7 @@ describe('Act II — player integration', () => {
     expect(snapshot.pendingStageAction).toEqual({ id: 'policy-drop', action: 'policy-drop' });
   });
 
-  it('resolving the file-drop parks at the activation approval, drawer closed, three proposed rules staged', () => {
+  it('resolving the file-drop parks at the activation approval, drawer closed, three proposed rules staged plus the data-gap row', () => {
     const player = new ScenarioPlayer(buildScenario());
     player.jumpToAct(2);
     player.play();
@@ -318,7 +372,13 @@ describe('Act II — player integration', () => {
       throw new Error('expected a RuleDiff render context item');
     }
     expect(ruleDiffItem.instruction.props.status).toBe('proposed');
-    expect(ruleDiffItem.instruction.props.rules).toHaveLength(3);
+    // Addendum v2.1: 4 rows by the validated render — R1–R3 plus the
+    // data-gap row parked by the Critic.
+    expect(ruleDiffItem.instruction.props.rules).toHaveLength(4);
+    const evaluableRules = ruleDiffItem.instruction.props.rules.filter((r) => r.evaluability === 'evaluable');
+    expect(evaluableRules).toHaveLength(3);
+    const gapRows = ruleDiffItem.instruction.props.rules.filter((r) => r.evaluability === 'data-gap');
+    expect(gapRows).toHaveLength(1);
   });
 
   it('approving activation ends Act II armed and active, fully audited, Act I counter untouched', () => {
@@ -414,20 +474,24 @@ describe('Act III — structure', () => {
     });
   });
 
-  it('fires the Data Collector exactly twice, each call carrying a distinct detail, with a done graphStep between them', () => {
+  it('fires the Data Collector exactly three times (Addendum v2.1 adds the account-snapshot call), each carrying a distinct detail in order, with a done graphStep between every pair', () => {
     const dataCollectorSteps = actThreeSteps.filter(
       (s): s is GraphStep => s.type === 'graphStep' && s.nodeId === 'data-collector',
     );
     const workingSteps = dataCollectorSteps.filter((s) => s.nodeState === 'working');
-    expect(workingSteps).toHaveLength(2);
-    expect(workingSteps[0].detail).toBeDefined();
-    expect(workingSteps[1].detail).toBeDefined();
-    expect(workingSteps[0].detail).not.toBe(workingSteps[1].detail);
+    expect(workingSteps).toHaveLength(3);
+    expect(workingSteps.map((s) => s.detail)).toEqual([
+      'call 1 · BT event detail',
+      'call 2 · payment history',
+      'call 3 · account snapshot',
+    ]);
 
-    const firstWorkingPos = dataCollectorSteps.indexOf(workingSteps[0]);
-    const secondWorkingPos = dataCollectorSteps.indexOf(workingSteps[1]);
-    const between = dataCollectorSteps.slice(firstWorkingPos + 1, secondWorkingPos);
-    expect(between.some((s) => s.nodeState === 'done')).toBe(true);
+    for (let i = 0; i < workingSteps.length - 1; i++) {
+      const firstPos = dataCollectorSteps.indexOf(workingSteps[i]);
+      const secondPos = dataCollectorSteps.indexOf(workingSteps[i + 1]);
+      const between = dataCollectorSteps.slice(firstPos + 1, secondPos);
+      expect(between.some((s) => s.nodeState === 'done')).toBe(true);
+    }
   });
 
   it('renders BTEventDetail, PaymentHistoryTable, and both rule citations with hand-reconcilable figures', () => {
@@ -480,12 +544,76 @@ describe('Act III — structure', () => {
     expect(kinds).toContain('run.started');
     expect(kinds).toContain('run.finished');
     expect(kinds).toContain('action.executed');
-    expect(kinds.filter((k) => k === 'step.completed')).toHaveLength(2);
+    // Addendum v2.1 adds a third step.completed (`select_response`,
+    // orchestrator) alongside the pre-existing `match_rules` (policy-analyst)
+    // and `evaluate_rules` (critic).
+    expect(kinds.filter((k) => k === 'step.completed')).toHaveLength(3);
 
+    const toolNames = auditSteps.map((s) => s.entry.toolName);
+    expect(toolNames).toContain('fetch_account_snapshot');
+    expect(toolNames).toContain('select_response');
+
+    // Addendum v2.1 adds a third Data Collector `tool.executed` write
+    // (`fetch_account_snapshot`) alongside the pre-existing
+    // `fetch_bt_event`/`fetch_payment_history` pair.
     const dataCollectorToolExecuted = auditSteps.filter(
       (s) => s.entry.kind === 'tool.executed' && s.entry.agentId === 'sentinel-data-collector',
     );
-    expect(dataCollectorToolExecuted).toHaveLength(2);
+    expect(dataCollectorToolExecuted).toHaveLength(3);
+
+    // `select_response` (the decision) is recorded on the audit trail
+    // BEFORE the hold approval is even asked for — the two rejections are
+    // "on the record" ahead of the human gate, not folded into it.
+    const selectResponseIndex = actThreeSteps.findIndex(
+      (s) => s.type === 'auditWrite' && s.entry.toolName === 'select_response',
+    );
+    const act3HoldIndex = actThreeSteps.findIndex((s) => s.type === 'awaitApproval' && s.id === 'act3-hold');
+    expect(selectResponseIndex).toBeGreaterThan(-1);
+    expect(selectResponseIndex).toBeLessThan(act3HoldIndex);
+  });
+
+  // Addendum v2.1 — the decide phase's DecisionCard: three response routes
+  // laid out, then progressively resolved under the same `render` id.
+  it('renders the act3-decision DecisionCard at least three times, opening all-considering and closing on hold selected / two rejected with reasons', () => {
+    const decisionRenders = actThreeSteps.filter(
+      (s): s is RenderStep => s.type === 'render' && s.id === 'act3-decision',
+    );
+    expect(decisionRenders.length).toBeGreaterThanOrEqual(3);
+
+    const first = decisionRenders[0];
+    if (first.instruction.component !== 'DecisionCard') throw new Error('expected a DecisionCard render step');
+    expect(first.instruction.props.options.every((o) => o.status === 'considering')).toBe(true);
+
+    const last = decisionRenders.at(-1)!;
+    if (last.instruction.component !== 'DecisionCard') throw new Error('expected a DecisionCard render step');
+    const { options } = last.instruction.props;
+
+    const selected = options.filter((o) => o.status === 'selected');
+    expect(selected).toHaveLength(1);
+    expect(selected[0].id).toBe('hold');
+
+    const rejected = options.filter((o) => o.status === 'rejected');
+    expect(rejected).toHaveLength(2);
+    for (const option of rejected) {
+      expect(option.rationale).toBeTruthy();
+    }
+    expect(selected[0].rationale).toBeTruthy();
+
+    // Options stay in the SAME order (hold, monitor, escalate) across every
+    // re-render — registry.ts's `DecisionCard` doc comment: the card must
+    // read as the same three rows resolving, never a reshuffled list.
+    for (const render of decisionRenders) {
+      if (render.instruction.component !== 'DecisionCard') throw new Error('expected a DecisionCard render step');
+      expect(render.instruction.props.options.map((o) => o.id)).toEqual(['hold', 'monitor', 'escalate']);
+    }
+  });
+
+  it("act3-hold's evidence includes the decision record alongside the existing evidence entries", () => {
+    const approvalStep = actThreeSteps.find(
+      (s): s is AwaitApprovalStep => s.type === 'awaitApproval' && s.id === 'act3-hold',
+    );
+    expect(approvalStep).toBeDefined();
+    expect(approvalStep!.payload.evidence).toContain('Decision record — 3 response routes weighed');
   });
 
   it('closes on {14, 1, 1} with the closing caption, the violation count derived from the replay log', () => {
@@ -509,10 +637,25 @@ describe('Act III — player integration', () => {
     expect(snapshot.railEvents.at(-1)?.highlight).toBe(true);
     expect(snapshot.counter).toEqual({ events: 9, violations: 1, flagged: 1 });
 
+    // Addendum v2.1: by the time the hold gate opens, the decide phase's
+    // third Data Collector call (the account snapshot) has already run —
+    // three `working` firings, not two.
     const dataCollectorWorkingMessages = snapshot.messages.filter(
       (m) => m.type === 'graphStep' && m.nodeId === 'data-collector' && m.nodeState === 'working',
     );
-    expect(dataCollectorWorkingMessages).toHaveLength(2);
+    expect(dataCollectorWorkingMessages).toHaveLength(3);
+
+    // The decision is already resolved (hold selected, two routes
+    // rejected) by the time the gate opens — the DecisionCard's last
+    // render is on the context rail before the approval is even asked for.
+    const decisionItem = snapshot.contextItems.find(
+      (item) => item.kind === 'render' && item.id === 'act3-decision',
+    );
+    if (!decisionItem || decisionItem.kind !== 'render' || decisionItem.instruction.component !== 'DecisionCard') {
+      throw new Error('expected a DecisionCard render context item');
+    }
+    const holdOption = decisionItem.instruction.props.options.find((o) => o.id === 'hold');
+    expect(holdOption?.status).toBe('selected');
 
     player.resolveApproval('act3-hold', true);
     vi.runAllTimers();

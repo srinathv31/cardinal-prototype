@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSeedDb } from './index';
 import { MARCUS_ACCOUNT_ID } from './marcus';
 import { ELENA_ACCOUNT_ID } from './elena';
-import { policyDocument, policyRules } from '../../sentinel/policy';
+import { policyDocument, policyObligationGap, policyRules } from '../../sentinel/policy';
 
 const DAY_MS = 86_400_000;
 const cents = (dollars: number) => Math.round(dollars * 100);
@@ -238,5 +238,17 @@ describe('policy fixtures', () => {
     expect(r1.criticNote).toBeTruthy();
     expect(policyRules.find((r) => r.ruleId === 'R2')!.criticNote).toBeUndefined();
     expect(policyRules.find((r) => r.ruleId === 'R3')!.criticNote).toBeUndefined();
+  });
+
+  // Addendum v2.1: the fourth obligation (Act II's data-gap row) cites
+  // §Affordability Review the same way R1–R3 cite their sections above —
+  // mirrors the rule-excerpt assertion, just against `policyObligationGap`
+  // instead of `policyRules`.
+  it("the obligation gap's excerpt.quote is a verbatim substring of §Affordability Review's body", () => {
+    const section = policyDocument.sections.find(
+      (s) => s.id === policyObligationGap.excerpt.sectionId,
+    );
+    expect(section).toBeDefined();
+    expect(section!.body.includes(policyObligationGap.excerpt.quote)).toBe(true);
   });
 });

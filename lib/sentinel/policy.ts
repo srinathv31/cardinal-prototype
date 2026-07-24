@@ -10,6 +10,18 @@
 // §definitions, which is what makes R2 internally consistent with Marcus's
 // fixture (v2-reuse-map.md §6): a balance-transfer credit line is a figure
 // the BT platform tracks separately from purchase open-to-buy.
+//
+// Addendum v2.1 (post-P4, CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum):
+// the document carries a SIXTH section, §Affordability Review, whose
+// obligation — income verification on transfers over $5,000 — Sentinel
+// genuinely cannot evaluate against SOE's current datasets. That obligation
+// is `policyObligationGap` below, deliberately typed as its OWN interface
+// rather than a fourth `PolicyRule`: it never becomes a rule (no `machine`
+// footer — nothing a Rule Engineer drafted), so folding it into `PolicyRule`
+// would force every consumer to guard against fields that don't apply to it.
+// The Critic's job in Act II is to find this gap and say so out loud — an
+// agent that knows the limits of its own data is the credibility beat the
+// addendum is for, not a fourth rule quietly failing validation.
 
 export interface PolicySection {
   id: string;
@@ -46,6 +58,11 @@ export const policyDocument: PolicyDocument = {
       id: 'limits',
       heading: 'Transfer Sizing Limits',
       body: "Transfer principal is sized against the account's dedicated balance-transfer allocation, not its purchase open-to-buy. Balance transfer principal may not exceed 90% of the account's balance-transfer credit line at initiation. Requests exceeding this threshold must be declined or resized before the transfer is initiated.",
+    },
+    {
+      id: 'affordability',
+      heading: 'Affordability Review',
+      body: 'Balance transfers must be affordable on the customer\'s current income, not only within credit limits. For any transfer request exceeding $5,000, servicing must verify that the customer\'s stated annual income on file is no more than 12 months old before initiation. Where current income cannot be verified, the request must be referred for manual affordability review before any transfer is initiated.',
     },
     {
       id: 'notices',
@@ -123,3 +140,50 @@ export const policyRules: PolicyRule[] = [
     },
   },
 ];
+
+/**
+ * The fourth obligation the Policy Analyst extracts from §Affordability
+ * Review — and the one the Critic parks as a data gap instead of validating
+ * (Addendum v2.1, header comment). Deliberately NOT a `PolicyRule`: it has no
+ * `machine` footer because no Rule Engineer ever drafted it into a
+ * machine-readable rule, and no `criticNote` in the "evaluable" sense R1
+ * carries — `criticNote` here is the Critic's reason the obligation is
+ * PARKED, not a note on an active rule. `requiredData` names the dataset
+ * Sentinel would need to onboard to close the gap (`lib/sentinel/policy.ts`
+ * has no `income-verification` collection today, and neither does
+ * `lib/soe` — the gap is real, not staged).
+ */
+export interface PolicyObligationGap {
+  obligationId: string;
+  title: string;
+  /** Model-authored plain-English restatement (editorial, brief §5a) —
+   * mirrors `PolicyRule.plainEnglish`'s role. */
+  plainEnglish: string;
+  excerpt: {
+    sectionId: string;
+    /** Verbatim substring of the cited section's body (asserted in
+     * lib/soe/seed/sentinel.test.ts, mirroring the `policyRules` excerpt
+     * assertions). */
+    quote: string;
+  };
+  /** Why the Critic parked this obligation instead of validating it — the
+   * fourth Rule Diff row's headline fact (rule-diff.tsx). */
+  criticNote: string;
+  /** The dataset(s) Sentinel would need onboarded to close the gap. */
+  requiredData: string[];
+}
+
+export const policyObligationGap: PolicyObligationGap = {
+  obligationId: 'O4',
+  title: 'Income Verification for Large Transfers',
+  plainEnglish:
+    "Transfers over $5,000 require the customer's stated income on file to be verified as no more than 12 months old before initiation.",
+  excerpt: {
+    sectionId: 'affordability',
+    quote:
+      "For any transfer request exceeding $5,000, servicing must verify that the customer's stated annual income on file is no more than 12 months old before initiation.",
+  },
+  criticNote:
+    'Not evaluable with current SOE data — requires income-verification records; dataset not onboarded.',
+  requiredData: ['income-verification'],
+};

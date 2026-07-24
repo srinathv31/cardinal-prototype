@@ -13,11 +13,18 @@
 // 02:47" hero card) and `RuleCitation` (the R1/R2 checked-condition card) —
 // documented in docs/wire-contract.md §9.6.
 //
+// Addendum v2.1 (post-P4, CARDINAL_V2_SENTINEL_BRIEF.md's closing addendum)
+// widens `RuleDiff` to carry a fourth, `data-gap` row (Act II's income-
+// verification obligation, `lib/sentinel/policy.ts`'s `policyObligationGap`)
+// and adds `DecisionCard` (Act III's response-routes card) — both purely
+// additive: every existing `RuleDiffProps` value still validates unchanged,
+// and `DecisionCard` is a new union member, not a change to an existing one.
+//
 // `SentinelRenderInstruction` widens the v1 `RenderInstruction` union with
-// `RuleDiff`, `BTEventDetail`, and `RuleCitation`; every `render` step on the
-// Sentinel stream (types.ts) carries this wider type instead of the plain
-// v1 one, so `render` steps can target either registry without a second
-// step type.
+// `RuleDiff`, `BTEventDetail`, `RuleCitation`, and `DecisionCard`; every
+// `render` step on the Sentinel stream (types.ts) carries this wider type
+// instead of the plain v1 one, so `render` steps can target either registry
+// without a second step type.
 
 import { z } from 'zod';
 import { renderInstructionSchema, type RenderInstruction } from '@/lib/registry/schemas';
@@ -46,23 +53,44 @@ export const ruleDiffPropsSchema = z.object({
         /** Model-authored plain-English restatement (editorial, brief §5a). */
         plainEnglish: z.string(),
         /** The machine-readable footer (right side): rule id, datasets
-         * touched, evaluation trigger — small monospace type in the card. */
-        machine: z.object({
-          ruleId: z.string(),
-          datasetsTouched: z.array(z.string()),
-          evaluationTrigger: z.string(),
-        }),
+         * touched, evaluation trigger — small monospace type in the card.
+         * Optional as of Addendum v2.1: a `data-gap` row (`evaluability`
+         * below) was never drafted into a machine-readable rule, so it has
+         * no footer to show — the card's absent-footer branch (rule-diff.tsx)
+         * is how the audience SEES that nothing machine-readable exists yet,
+         * not just reads it in a caption. */
+        machine: z
+          .object({
+            ruleId: z.string(),
+            datasetsTouched: z.array(z.string()),
+            evaluationTrigger: z.string(),
+          })
+          .optional(),
         /** Critic's evaluability note, e.g. "Evaluable with current SOE
          * data: payments + balance-transfer events." Optional — not every
-         * rule carries one. */
+         * rule carries one. For a `data-gap` row this is the Critic's
+         * reason the obligation is parked (`PolicyObligationGap.criticNote`,
+         * lib/sentinel/policy.ts), not an aside on an active rule — the
+         * component renders it prominently either way (rule-diff.tsx). */
         criticNote: z.string().optional(),
         /** Critic-pass flag — set by the scenario step that models the
-         * critic validating the rule, never derived/inferred client-side. */
+         * critic validating the rule, never derived/inferred client-side.
+         * A `data-gap` row is never validated (`false`) — it was never
+         * evaluable in the first place, so there's nothing to validate. */
         validated: z.boolean().default(false),
+        /** Addendum v2.1: `'evaluable'` (the default, R1–R3's kind) is a
+         * normal drafted-and-validated-or-validating rule; `'data-gap'`
+         * marks the fourth row — an obligation the Policy Analyst extracted
+         * but the Critic could not evaluate against current SOE data
+         * (`policyObligationGap`, lib/sentinel/policy.ts). Set by the
+         * scenario step, never inferred client-side from the presence/
+         * absence of `machine` or `validated` — the renderer trusts this
+         * field alone to pick its data-gap presentation (rule-diff.tsx). */
+        evaluability: z.enum(['evaluable', 'data-gap']).default('evaluable'),
       }),
     )
     .min(1)
-    .max(3),
+    .max(4),
 });
 export type RuleDiffProps = z.infer<typeof ruleDiffPropsSchema>;
 
@@ -130,6 +158,63 @@ export const ruleCitationPropsSchema = z.object({
 });
 export type RuleCitationProps = z.infer<typeof ruleCitationPropsSchema>;
 
+/** `DecisionCard` (Act III, Addendum v2.1 — CARDINAL_V2_SENTINEL_BRIEF.md's
+ * closing addendum: "the response is a judgment call") — the stacked-
+ * options card that makes the agent's post-verdict JUDGMENT visible, not
+ * just its rule evaluation. R1's verdict (`RuleCitation` above) is
+ * deterministic and stays that way; this card is the different thing that
+ * happens next — laying out the compliant response routes, then resolving
+ * them one at a time as the investigation gathers more evidence (the
+ * account snapshot + cure check).
+ *
+ * `options[].status` is scripted by the scenario step at each `render`,
+ * NEVER derived client-side from `options[].rationale` or from the other
+ * options' statuses — exactly the invariant `RuleCitation.verdict` carries
+ * above (v1 invariant 5a/5b: the renderer holds no judgment logic of its
+ * own, it only paints the judgment the scenario already made). The demo
+ * scenario re-renders this card three times under the SAME `render` id
+ * (wire-contract §9.1's same-id replace-in-place semantics) — all
+ * `'considering'`, then one route rejected, then the final resolution — and
+ * `options` must keep the same order across every re-render so the card
+ * reads as three routes progressively resolving, not as a reshuffled list
+ * (demo-scenario.ts's Act III decision phase). */
+export const decisionCardPropsSchema = z.object({
+  /** e.g. "Response to R1 violation". */
+  title: z.string(),
+  /** Optional framing line under the title, e.g. "The verdict is
+   * deterministic. The response is a judgment call." */
+  subtitle: z.string().optional(),
+  options: z
+    .array(
+      z.object({
+        /** Stable route id, e.g. 'hold' | 'monitor' | 'escalate' — also the
+         * React key, so it must stay identical across same-id re-renders. */
+        id: z.string(),
+        label: z.string(),
+        /** One-line description of the route, e.g. "Pause posting while
+         * eligibility is reviewed; reversible." */
+        summary: z.string(),
+        /** Scripted by the scenario step — see the field-group comment
+         * above. `'considering'` is the resting/open state before a
+         * decision lands on this route; `'selected'`/`'rejected'` are
+         * terminal for this card's lifetime. */
+        status: z.enum(['considering', 'selected', 'rejected']),
+        /** Why this route was selected or rejected — required reading once
+         * a route leaves `'considering'`, so the rejections are "on the
+         * record" (brief addendum) rather than a silent status flip.
+         * Optional because a still-`'considering'` route has no rationale
+         * yet. */
+        rationale: z.string().optional(),
+      }),
+    )
+    .min(2)
+    .max(4),
+  /** Small print at the card's foot, e.g. "Whichever route is selected
+   * requires human approval before anything executes." */
+  footnote: z.string().optional(),
+});
+export type DecisionCardProps = z.infer<typeof decisionCardPropsSchema>;
+
 /** `RenderInstruction` (v1, `lib/registry/schemas.ts`) widened with the
  * Sentinel-only components. Every `render` step on the Sentinel stream
  * carries this type instead of the plain v1 one (types.ts). */
@@ -138,9 +223,11 @@ export const sentinelRenderInstructionSchema = z.union([
   z.object({ component: z.literal('RuleDiff'), props: ruleDiffPropsSchema }),
   z.object({ component: z.literal('BTEventDetail'), props: btEventDetailPropsSchema }),
   z.object({ component: z.literal('RuleCitation'), props: ruleCitationPropsSchema }),
+  z.object({ component: z.literal('DecisionCard'), props: decisionCardPropsSchema }),
 ]);
 export type SentinelRenderInstruction =
   | RenderInstruction
   | { component: 'RuleDiff'; props: RuleDiffProps }
   | { component: 'BTEventDetail'; props: BTEventDetailProps }
-  | { component: 'RuleCitation'; props: RuleCitationProps };
+  | { component: 'RuleCitation'; props: RuleCitationProps }
+  | { component: 'DecisionCard'; props: DecisionCardProps };
