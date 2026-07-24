@@ -104,17 +104,22 @@ function edgeKey(edge: SentinelGraphEdge): string {
 const ANIMATED_EDGE_STYLE = { stroke: "var(--color-primary)", strokeWidth: 2 };
 const DIM_EDGE_STYLE = { stroke: "var(--color-border)", strokeWidth: 1.5 };
 
-type SentinelAgentNodeData = { nodeId: SentinelNodeId; state: SentinelNodeState };
+type SentinelAgentNodeData = { nodeId: SentinelNodeId; state: SentinelNodeState; detail?: string };
 type SentinelAgentNodeType = Node<SentinelAgentNodeData, "sentinelAgent">;
 
 /** State visuals (brief §4: idle dim, working glow + pulse, done steady
  * lit) — a presentational lookup, not logic, mirroring cardinal-node.tsx's
  * CATEGORY_CHIP_STYLES. The state caption is real text (not just a glow) so
- * it reads at projector distance (brief §1). */
+ * it reads at projector distance (brief §1). `detail`, when present, WINS
+ * over the plain state word (brief §3 Act III: "Data Collector fires twice
+ * ... visibly two calls" — a caption like "call 1 · BT event detail" reads
+ * at projector distance where a glow pulse alone wouldn't). Same styling/
+ * color logic either way — only the text swaps. */
 function SentinelAgentNode({ data }: NodeProps<SentinelAgentNodeType>) {
   const Icon = NODE_ICONS[data.nodeId];
   const label = NODE_LABELS[data.nodeId];
   const state = data.state;
+  const caption = data.detail ?? STATE_CAPTION[state];
 
   return (
     <div className="relative w-44">
@@ -149,8 +154,8 @@ function SentinelAgentNode({ data }: NodeProps<SentinelAgentNodeType>) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{label}</p>
-          <p className={cn("text-xs", state === "working" ? "text-primary" : "text-muted-foreground")}>
-            {STATE_CAPTION[state]}
+          <p className={cn("truncate text-xs", state === "working" ? "text-primary" : "text-muted-foreground")}>
+            {caption}
           </p>
         </div>
         <Handle type="source" position={Position.Bottom} className="opacity-0 pointer-events-none" />
@@ -166,11 +171,13 @@ export function LiveAgentGraph({
   animatedEdges,
   headline,
   approvalPending,
+  nodeDetails,
 }: {
   nodes: Record<SentinelNodeId, SentinelNodeState>;
   animatedEdges: SentinelGraphEdge[];
   headline: string;
   approvalPending: boolean;
+  nodeDetails: Partial<Record<SentinelNodeId, string>>;
 }) {
   // Approval Gate lights up whenever a gate is pending (brief §4) — a
   // presentational override, not a second source of truth: scenarios may
@@ -187,9 +194,9 @@ export function LiveAgentGraph({
         id: nodeId,
         type: "sentinelAgent",
         position: NODE_POSITIONS[nodeId],
-        data: { nodeId, state: effectiveNodes[nodeId] },
+        data: { nodeId, state: effectiveNodes[nodeId], detail: nodeDetails[nodeId] },
       })),
-    [effectiveNodes],
+    [effectiveNodes, nodeDetails],
   );
 
   const flowEdges = useMemo<Edge[]>(() => {

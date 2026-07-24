@@ -101,6 +101,7 @@ export function Stage({
           animatedEdges={state.graph.animatedEdges}
           headline={state.headline}
           approvalPending={state.status === "awaiting-approval"}
+          nodeDetails={state.graph.nodeDetails}
         />
         <div className="relative grid min-h-0 overflow-hidden">
           <ContextRail items={state.contextItems} onResolveApproval={onResolveApproval} />

@@ -31,9 +31,27 @@
 // `buildDemoScenario`'s Act II sequence and, unconditionally, `<Stage>`'s
 // `policyDocument` prop (both call sites below) — the Policy Panel needs the
 // document to render its preview regardless of which scenario is loaded.
+//
+// P4 (W4.3) adds the Act III data-flow, data-driven end to end (no
+// hardcoded 'acct-marcus' anywhere in this file): find the night's BT event
+// on the replay log itself, read its `accountId` off of THAT, fetch the
+// three datasets Act III's investigation cites in parallel, then match the
+// adapter's `BalanceTransferEvent` back to the replay log's `StreamEvent` by
+// `timestamp` (both are stamped from the same seed fixture, so they're
+// identical strings — brief §5's hand-reconcilable rule, one fact, two
+// shapes). Both `.find()`s throw on a miss instead of falling through
+// silently — a demo that quietly plays Act III against the wrong account or
+// skips the catch entirely is worse than one that fails loudly at the
+// fetch (brief §5a: the model never invents data; this file doesn't either,
+// it just refuses to guess when the seed doesn't shape up as expected).
 
 import { Stage } from "@/components/sentinel/stage";
-import { getSentinelReplayLog } from "@/lib/soe";
+import {
+  getBalanceTransferEvents,
+  getPartiesForAccount,
+  getPayments,
+  getSentinelReplayLog,
+} from "@/lib/soe";
 import { buildDemoScenario } from "@/lib/sentinel/scenario/demo-scenario";
 import { graphRehearsalScenario } from "@/lib/sentinel/scenario/graph-rehearsal";
 import { policyDocument, policyRules } from "@/lib/sentinel/policy";
@@ -55,9 +73,34 @@ export default async function SentinelPage({
   }
 
   const replayEvents = await getSentinelReplayLog();
+
+  const btReplayEvent = replayEvents.find((e) => e.kind === "balance_transfer.initiated");
+  if (!btReplayEvent) {
+    throw new Error("SentinelPage: replay log is missing its balance_transfer.initiated event");
+  }
+  const accountId = btReplayEvent.accountId;
+
+  const [payments, balanceTransferEvents, parties] = await Promise.all([
+    getPayments(accountId),
+    getBalanceTransferEvents(accountId),
+    getPartiesForAccount(accountId),
+  ]);
+
+  const btEvent = balanceTransferEvents.find((e) => e.timestamp === btReplayEvent.timestamp);
+  if (!btEvent) {
+    throw new Error(`SentinelPage: no balance-transfer event on ${accountId} matches the replay log's timestamp`);
+  }
+
+  const primary = parties.find((p) => p.role.role === "PRIMARY");
+  if (!primary) {
+    throw new Error(`SentinelPage: no PRIMARY party on ${accountId}`);
+  }
+  const partyName = primary.party.fullName;
+
   const scenario = buildDemoScenario({
     replayEvents,
     policy: { document: policyDocument, rules: policyRules },
+    actIII: { btEvent, payments, partyName },
   });
 
   return <Stage scenario={scenario} policyDocument={policyDocument} />;

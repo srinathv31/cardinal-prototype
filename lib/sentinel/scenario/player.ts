@@ -30,6 +30,7 @@ import type {
   GraphStep,
   NarrationStep,
   PolicyPanelStep,
+  RailResetStep,
   RenderStep,
   ScenarioTimedStep,
   SentinelContextItem,
@@ -69,7 +70,8 @@ type InstantStep =
   | RenderStep
   | CounterUpdateStep
   | AuditWriteStep
-  | PolicyPanelStep;
+  | PolicyPanelStep
+  | RailResetStep;
 
 export class ScenarioPlayer {
   private readonly scenario: SentinelScenario;
@@ -96,6 +98,11 @@ export class ScenarioPlayer {
   private counterCaption: string | undefined = undefined;
   private graphNodes: Record<SentinelNodeId, SentinelNodeState> = idleGraphNodes();
   private animatedEdges: SentinelGraphEdge[] = [];
+  /** Per-node activity caption (types.ts's `GraphStep.detail` doc comment) —
+   * set wholesale by a `graphStep` carrying `detail`, deleted wholesale by
+   * one for the same node without it. Partial map, not a six-node record:
+   * absence means "show the plain state word" (live-agent-graph.tsx). */
+  private nodeDetails: Partial<Record<SentinelNodeId, string>> = {};
   private headline = '';
   private contextItems: SentinelContextItem[] = [];
   private auditEntries: SentinelStageState['auditEntries'] = [];
@@ -357,6 +364,9 @@ export class ScenarioPlayer {
       case 'policyPanel':
         this.handlePolicyPanel(step);
         return;
+      case 'railReset':
+        this.handleRailReset();
+        return;
     }
   }
 
@@ -482,10 +492,20 @@ export class ScenarioPlayer {
       nodeId: step.nodeId,
       nodeState: step.nodeState,
       animatedEdges: step.animatedEdges,
+      detail: step.detail,
     });
     this.graphNodes = { ...this.graphNodes, [step.nodeId]: step.nodeState };
     if (step.animatedEdges !== undefined) {
       this.animatedEdges = step.animatedEdges.slice();
+    }
+    // Declarative wholesale set/clear per node (types.ts's `GraphStep.detail`
+    // doc comment) — mirrors `animatedEdges` replacing rather than diffing.
+    if (step.detail !== undefined) {
+      this.nodeDetails = { ...this.nodeDetails, [step.nodeId]: step.detail };
+    } else {
+      const rest = { ...this.nodeDetails };
+      delete rest[step.nodeId];
+      this.nodeDetails = rest;
     }
     this.commit();
   }
@@ -518,6 +538,15 @@ export class ScenarioPlayer {
   private handlePolicyPanel(step: PolicyPanelStep): void {
     this.publish({ type: 'policyPanel', panel: step.panel });
     this.policyPanel = step.panel;
+    this.commit();
+  }
+
+  /** Act III's fresh observation window (types.ts's `RailResetStep` doc
+   * comment) — clears ONLY `railEvents`; the counter is a separate,
+   * declarative `counterUpdate` the scenario pairs alongside this step. */
+  private handleRailReset(): void {
+    this.publish({ type: 'railReset' });
+    this.railEvents = [];
     this.commit();
   }
 
@@ -556,6 +585,7 @@ export class ScenarioPlayer {
     this.counterCaption = undefined;
     this.graphNodes = idleGraphNodes();
     this.animatedEdges = [];
+    this.nodeDetails = {};
     this.headline = '';
     this.contextItems = [];
     this.auditEntries = [];
@@ -580,7 +610,11 @@ export class ScenarioPlayer {
       railEvents: this.railEvents.slice(),
       counter: { ...this.counter },
       counterCaption: this.counterCaption,
-      graph: { nodes: { ...this.graphNodes }, animatedEdges: this.animatedEdges.slice() },
+      graph: {
+        nodes: { ...this.graphNodes },
+        animatedEdges: this.animatedEdges.slice(),
+        nodeDetails: { ...this.nodeDetails },
+      },
       headline: this.headline,
       contextItems: this.contextItems.slice(),
       auditEntries: this.auditEntries.slice(),

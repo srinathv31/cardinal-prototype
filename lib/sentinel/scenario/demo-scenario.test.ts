@@ -14,7 +14,10 @@
 // fixtures it's given.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildSentinelReplayLog } from '@/lib/soe/seed/sentinel';
+import { formatCurrency } from '@/lib/agents/format';
+import { buildMarcus } from '@/lib/soe/seed/marcus';
+import { buildSentinelMarcusBt, buildSentinelReplayLog } from '@/lib/soe/seed/sentinel';
+import type { Payment } from '@/lib/soe/types';
 import { policyDocument, policyRules } from '@/lib/sentinel/policy';
 import { buildDemoScenario } from './demo-scenario';
 import { ScenarioPlayer } from './player';
@@ -43,16 +46,39 @@ const ANCHOR = new Date('2026-08-05T00:00:00.000Z');
 const FINALE_CAPTION = 'Detected day 4 by manual sampling — if at all.';
 const POLICY = { document: policyDocument, rules: policyRules };
 
+/** Adapter's `getPayments` sort (lib/soe/adapter.ts), reproduced here on the
+ * direct seed-builder import so the test fixture matches what the real
+ * page.tsx call site hands `buildDemoScenario` (most-recent-first) — not
+ * `buildMarcus(ANCHOR).payments`'s own ledger-ascending order. */
+function sortPaymentsDescending(payments: Payment[]): Payment[] {
+  return [...payments].sort((a, b) => b.dueDate.localeCompare(a.dueDate));
+}
+
+/** Act III fixture, built from the same seed builders sentinel.test.ts uses
+ * (spec: direct seed-builder imports in tests, matching that file's
+ * convention) rather than the adapter, which this scenario module never
+ * imports (header comment: zero data-access surface of its own). */
+const ACT_III_FIXTURE = {
+  btEvent: buildSentinelMarcusBt(ANCHOR),
+  payments: sortPaymentsDescending(buildMarcus(ANCHOR).payments),
+  partyName: 'Marcus Webb',
+};
+
 function buildScenario(): SentinelScenario {
-  return buildDemoScenario({ replayEvents: buildSentinelReplayLog(ANCHOR), policy: POLICY });
+  return buildDemoScenario({
+    replayEvents: buildSentinelReplayLog(ANCHOR),
+    policy: POLICY,
+    actIII: ACT_III_FIXTURE,
+  });
 }
 
 describe('buildDemoScenario — structure', () => {
   const replayEvents = buildSentinelReplayLog(ANCHOR);
-  const scenario = buildDemoScenario({ replayEvents, policy: POLICY });
+  const scenario = buildDemoScenario({ replayEvents, policy: POLICY, actIII: ACT_III_FIXTURE });
   const act2MarkerIndex = scenario.steps.findIndex((s) => s.type === 'actMarker' && s.act === 2);
+  const act3MarkerIndex = scenario.steps.findIndex((s) => s.type === 'actMarker' && s.act === 3);
 
-  it('opens on the Act I marker, holds exactly one Act II marker mid-scenario, and closes on the Act III marker', () => {
+  it('opens on the Act I marker, holds the Act II and Act III markers mid-scenario (Act III no longer closes the file), and closes on Act III\'s closing narration', () => {
     const markers = scenario.steps.filter((s) => s.type === 'actMarker');
     expect(markers).toHaveLength(3);
     expect(scenario.steps[0]).toMatchObject({ type: 'actMarker', act: 1, title: 'Act I — The gap' });
@@ -62,15 +88,21 @@ describe('buildDemoScenario — structure', () => {
       act: 2,
       title: 'Act II — Policy to production',
     });
-    expect(scenario.steps.at(-1)).toMatchObject({
+    expect(act3MarkerIndex).toBeGreaterThan(act2MarkerIndex);
+    expect(scenario.steps[act3MarkerIndex]).toMatchObject({
       type: 'actMarker',
       act: 3,
       title: 'Act III — The catch',
     });
+    // The act-3 marker is mid-scenario now, not the last step — Act III's
+    // content (W4.3) follows it.
+    expect(act3MarkerIndex).toBeLessThan(scenario.steps.length - 1);
+    expect(scenario.steps.at(-1)).toMatchObject({ type: 'narration', id: 'n3-close' });
   });
 
-  it('emits exactly the 14 replay events, in order, none highlighted or badged', () => {
-    const emitSteps = scenario.steps.filter((s): s is EmitEventStep => s.type === 'emitEvent');
+  it('emits exactly the 14 replay events in Act I, in order, none highlighted or badged (Act III replays them again separately, see below)', () => {
+    const actOneSteps = scenario.steps.slice(0, act2MarkerIndex);
+    const emitSteps = actOneSteps.filter((s): s is EmitEventStep => s.type === 'emitEvent');
     expect(emitSteps).toHaveLength(14);
     expect(emitSteps.map((s) => s.event.eventId)).toEqual(replayEvents.map((e) => e.eventId));
     for (const step of emitSteps) {
@@ -79,8 +111,14 @@ describe('buildDemoScenario — structure', () => {
     }
   });
 
-  it('counter ascends 1..14 with violations/flagged at 0 on every pre-finale update, then the finale reveals 1 violation', () => {
-    const counterSteps = scenario.steps.filter((s): s is CounterUpdateStep => s.type === 'counterUpdate');
+  it('emits 28 events total across the file — Act I\'s 14 plus Act III\'s replay of the same 14', () => {
+    const allEmitSteps = scenario.steps.filter((s) => s.type === 'emitEvent');
+    expect(allEmitSteps).toHaveLength(28);
+  });
+
+  it('counter ascends 1..14 with violations/flagged at 0 on every pre-finale update in Act I, then the finale reveals 1 violation', () => {
+    const actOneSteps = scenario.steps.slice(0, act2MarkerIndex);
+    const counterSteps = actOneSteps.filter((s): s is CounterUpdateStep => s.type === 'counterUpdate');
     expect(counterSteps).toHaveLength(15); // 14 per-event ticks + 1 finale
 
     counterSteps.slice(0, -1).forEach((step, i) => {
@@ -133,9 +171,18 @@ describe('buildDemoScenario — ScenarioPlayer integration', () => {
 });
 
 describe('Act II — structure', () => {
-  const scenario = buildDemoScenario({ replayEvents: buildSentinelReplayLog(ANCHOR), policy: POLICY });
+  const scenario = buildDemoScenario({
+    replayEvents: buildSentinelReplayLog(ANCHOR),
+    policy: POLICY,
+    actIII: ACT_III_FIXTURE,
+  });
   const act2MarkerIndex = scenario.steps.findIndex((s) => s.type === 'actMarker' && s.act === 2);
-  const actTwoSteps = scenario.steps.slice(act2MarkerIndex + 1);
+  const act3MarkerIndex = scenario.steps.findIndex((s) => s.type === 'actMarker' && s.act === 3);
+  // Bounded to end BEFORE the act-3 marker — Act III (W4.3) now appends its
+  // own content after that marker, and several assertions below (exactly
+  // one awaitApproval, exactly six armed graphSteps) would double-count
+  // Act III's if this slice ran unbounded to the end of the file.
+  const actTwoSteps = scenario.steps.slice(act2MarkerIndex + 1, act3MarkerIndex);
 
   it('opens Act II with the policy drawer dropping', () => {
     expect(actTwoSteps[0]).toMatchObject({ type: 'policyPanel', panel: 'drop' });
@@ -305,5 +352,249 @@ describe('Act II — player integration', () => {
     expect(auditKinds).toContain('run.finished');
 
     expect(snapshot.counter).toEqual({ events: 14, violations: 1, flagged: 0 });
+  });
+});
+
+// W4.3 — Act III scenario ("the catch"). Structure tests scope to the
+// content AFTER the act-3 marker (mirrors Act II's `actTwoSteps` bounding
+// above); player-integration tests exercise the whole three-act pass.
+
+describe('Act III — structure', () => {
+  const replayEvents = buildSentinelReplayLog(ANCHOR);
+  const scenario = buildDemoScenario({ replayEvents, policy: POLICY, actIII: ACT_III_FIXTURE });
+  const act3MarkerIndex = scenario.steps.findIndex((s) => s.type === 'actMarker' && s.act === 3);
+  const actThreeSteps = scenario.steps.slice(act3MarkerIndex + 1);
+
+  const catchIndex = replayEvents.findIndex((e) => e.kind === 'balance_transfer.initiated');
+  const elenaIndex = replayEvents.findIndex((e) => e.kind === 'bt.promo_expiring');
+  const violations = replayEvents.filter((e) => e.kind === 'balance_transfer.initiated').length;
+
+  it('opens with railReset, and a zeroing counterUpdate precedes any emitEvent', () => {
+    expect(actThreeSteps[0]).toMatchObject({ type: 'railReset' });
+
+    const firstCounterIndex = actThreeSteps.findIndex((s) => s.type === 'counterUpdate');
+    const firstEmitIndex = actThreeSteps.findIndex((s) => s.type === 'emitEvent');
+    expect(firstCounterIndex).toBeGreaterThan(-1);
+    expect(firstCounterIndex).toBeLessThan(firstEmitIndex);
+
+    const zeroingCounter = actThreeSteps[firstCounterIndex] as CounterUpdateStep;
+    expect(zeroingCounter.counter).toEqual({ events: 0, violations: 0, flagged: 0 });
+  });
+
+  it('emits exactly 14 events matching the replay log in order, exactly one highlighted and one badged, on different events', () => {
+    const emitSteps = actThreeSteps.filter((s): s is EmitEventStep => s.type === 'emitEvent');
+    expect(emitSteps).toHaveLength(14);
+    expect(emitSteps.map((s) => s.event.eventId)).toEqual(replayEvents.map((e) => e.eventId));
+
+    const highlighted = emitSteps.filter((s) => s.highlight === true);
+    expect(highlighted).toHaveLength(1);
+    expect(highlighted[0].event.eventId).toBe(replayEvents[catchIndex].eventId);
+
+    const badged = emitSteps.filter((s) => s.complianceBadge !== undefined);
+    expect(badged).toHaveLength(1);
+    expect(badged[0].event.eventId).toBe(replayEvents[elenaIndex].eventId);
+    expect(badged[0].complianceBadge).toBe('R3 satisfied — 45-day notice on record');
+
+    expect(highlighted[0].event.eventId).not.toBe(badged[0].event.eventId);
+  });
+
+  it('reconciles the counter after every replay emit against the replay log itself, not a hardcoded table', () => {
+    const emitSteps = actThreeSteps.filter((s): s is EmitEventStep => s.type === 'emitEvent');
+
+    emitSteps.forEach((emitStep, i) => {
+      const emitIndex = actThreeSteps.indexOf(emitStep);
+      const counterStep = actThreeSteps[emitIndex + 1];
+      if (counterStep.type !== 'counterUpdate') {
+        throw new Error(`expected a counterUpdate immediately after replay emit ${i}`);
+      }
+      const expectedViolations = replayEvents
+        .slice(0, i + 1)
+        .filter((e) => e.kind === 'balance_transfer.initiated').length;
+      expect(counterStep.counter).toEqual({ events: i + 1, violations: expectedViolations, flagged: expectedViolations });
+    });
+  });
+
+  it('fires the Data Collector exactly twice, each call carrying a distinct detail, with a done graphStep between them', () => {
+    const dataCollectorSteps = actThreeSteps.filter(
+      (s): s is GraphStep => s.type === 'graphStep' && s.nodeId === 'data-collector',
+    );
+    const workingSteps = dataCollectorSteps.filter((s) => s.nodeState === 'working');
+    expect(workingSteps).toHaveLength(2);
+    expect(workingSteps[0].detail).toBeDefined();
+    expect(workingSteps[1].detail).toBeDefined();
+    expect(workingSteps[0].detail).not.toBe(workingSteps[1].detail);
+
+    const firstWorkingPos = dataCollectorSteps.indexOf(workingSteps[0]);
+    const secondWorkingPos = dataCollectorSteps.indexOf(workingSteps[1]);
+    const between = dataCollectorSteps.slice(firstWorkingPos + 1, secondWorkingPos);
+    expect(between.some((s) => s.nodeState === 'done')).toBe(true);
+  });
+
+  it('renders BTEventDetail, PaymentHistoryTable, and both rule citations with hand-reconcilable figures', () => {
+    const btDetail = actThreeSteps.find((s) => s.type === 'render' && s.id === 'act3-bt-detail') as
+      | RenderStep
+      | undefined;
+    if (!btDetail || btDetail.instruction.component !== 'BTEventDetail') {
+      throw new Error('expected a BTEventDetail render step');
+    }
+    expect(btDetail.instruction.props.amount).toBe(formatCurrency(ACT_III_FIXTURE.btEvent.transferAmount));
+
+    const paymentsRender = actThreeSteps.find((s) => s.type === 'render' && s.id === 'act3-payments') as
+      | RenderStep
+      | undefined;
+    if (!paymentsRender || paymentsRender.instruction.component !== 'PaymentHistoryTable') {
+      throw new Error('expected a PaymentHistoryTable render step');
+    }
+    const missedRows = paymentsRender.instruction.props.rows.filter((r) => r.flag === 'missed');
+    expect(missedRows).toHaveLength(1);
+
+    const r1 = actThreeSteps.find((s) => s.type === 'render' && s.id === 'act3-r1') as RenderStep | undefined;
+    if (!r1 || r1.instruction.component !== 'RuleCitation') {
+      throw new Error('expected a RuleCitation render step for R1');
+    }
+    expect(r1.instruction.props.verdict).toBe('violation');
+    expect(r1.instruction.props.checks).toHaveLength(2);
+    expect(r1.instruction.props.checks.every((c) => c.met)).toBe(true);
+    expect(r1.instruction.props.ruleText).toBe(policyRules.find((r) => r.ruleId === 'R1')!.plainEnglish);
+
+    const r2 = actThreeSteps.find((s) => s.type === 'render' && s.id === 'act3-r2') as RenderStep | undefined;
+    if (!r2 || r2.instruction.component !== 'RuleCitation') {
+      throw new Error('expected a RuleCitation render step for R2');
+    }
+    expect(r2.instruction.props.verdict).toBe('pass');
+    expect(r2.instruction.props.ruleText).toBe(policyRules.find((r) => r.ruleId === 'R2')!.plainEnglish);
+  });
+
+  it('gates on exactly one Act III approval scoped to sentinel-demo-act3, with the full audit trail present', () => {
+    const approvalSteps = actThreeSteps.filter((s): s is AwaitApprovalStep => s.type === 'awaitApproval');
+    expect(approvalSteps).toHaveLength(1);
+    expect(approvalSteps[0].id).toBe('act3-hold');
+    expect(approvalSteps[0].audit.runId).toBe('sentinel-demo-act3');
+
+    const auditSteps = actThreeSteps.filter((s): s is AuditWriteStep => s.type === 'auditWrite');
+    for (const step of auditSteps) {
+      expect(step.entry.runId).toBe('sentinel-demo-act3');
+    }
+
+    const kinds = auditSteps.map((s) => s.entry.kind);
+    expect(kinds).toContain('run.started');
+    expect(kinds).toContain('run.finished');
+    expect(kinds).toContain('action.executed');
+    expect(kinds.filter((k) => k === 'step.completed')).toHaveLength(2);
+
+    const dataCollectorToolExecuted = auditSteps.filter(
+      (s) => s.entry.kind === 'tool.executed' && s.entry.agentId === 'sentinel-data-collector',
+    );
+    expect(dataCollectorToolExecuted).toHaveLength(2);
+  });
+
+  it('closes on {14, 1, 1} with the closing caption, the violation count derived from the replay log', () => {
+    const counterSteps = actThreeSteps.filter((s): s is CounterUpdateStep => s.type === 'counterUpdate');
+    const finale = counterSteps.at(-1)!;
+    expect(finale.counter).toEqual({ events: replayEvents.length, violations, flagged: violations });
+    expect(finale.caption).toBe('Caught in seconds · human-approved response · full audit trail.');
+  });
+});
+
+describe('Act III — player integration', () => {
+  it('stops the rail at the catch awaiting approval, then completes with all nodes armed and Elena badged', () => {
+    const player = new ScenarioPlayer(buildScenario());
+    player.jumpToAct(3);
+    player.play();
+    vi.runAllTimers(); // halts on the awaitApproval hard-block — no timer survives it
+
+    let snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('awaiting-approval');
+    expect(snapshot.railEvents).toHaveLength(9); // the night stopped mid-rail at the catch (railReset then 9 emits)
+    expect(snapshot.railEvents.at(-1)?.highlight).toBe(true);
+    expect(snapshot.counter).toEqual({ events: 9, violations: 1, flagged: 1 });
+
+    const dataCollectorWorkingMessages = snapshot.messages.filter(
+      (m) => m.type === 'graphStep' && m.nodeId === 'data-collector' && m.nodeState === 'working',
+    );
+    expect(dataCollectorWorkingMessages).toHaveLength(2);
+
+    player.resolveApproval('act3-hold', true);
+    vi.runAllTimers();
+
+    snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('done');
+    expect(snapshot.railEvents).toHaveLength(14);
+    expect(snapshot.counter).toEqual({ events: 14, violations: 1, flagged: 1 });
+
+    for (const nodeId of SENTINEL_NODE_IDS) {
+      expect(snapshot.graph.nodes[nodeId]).toBe('armed');
+    }
+
+    const elenaRailEvent = snapshot.railEvents.find((r) => r.event.kind === 'bt.promo_expiring');
+    expect(elenaRailEvent?.complianceBadge).toBe('R3 satisfied — 45-day notice on record');
+
+    expect(snapshot.headline).toBe('Same night. Same events. This time the 2:47 AM transfer never slipped past.');
+
+    const act3AuditKinds = snapshot.auditEntries
+      .filter((e) => e.runId === 'sentinel-demo-act3')
+      .map((e) => e.kind);
+    expect(act3AuditKinds).toContain('run.finished');
+  });
+});
+
+/** Plays a fresh (or freshly reset) player through all three acts,
+ * asserting each act-boundary halt along the way — the full presenter
+ * sequence: play, resolve the file-drop, resolve the activation approval,
+ * play again into Act III, resolve the hold, done. Shared by both passes in
+ * the back-to-back test below (spec: "works back-to-back after one
+ * reset"). */
+function playThroughAllThreeActs(player: ScenarioPlayer): void {
+  player.play(); // consumes the Act I marker
+  vi.runAllTimers();
+  expect(player.getSnapshot().status).toBe('paused');
+  expect(player.getSnapshot().act).toBe(1);
+
+  player.play(); // consumes the Act II marker
+  vi.runAllTimers();
+  expect(player.getSnapshot().status).toBe('awaiting-stage-action');
+
+  player.resolveStageAction('policy-drop');
+  vi.runAllTimers();
+  expect(player.getSnapshot().status).toBe('awaiting-approval');
+
+  player.resolveApproval('act2-activate', true);
+  vi.runAllTimers();
+  expect(player.getSnapshot().status).toBe('paused'); // parked, unconsumed, at the Act III marker
+  expect(player.getSnapshot().act).toBe(2);
+
+  player.play(); // consumes the Act III marker
+  vi.runAllTimers();
+  expect(player.getSnapshot().status).toBe('awaiting-approval');
+
+  player.resolveApproval('act3-hold', true);
+  vi.runAllTimers();
+  expect(player.getSnapshot().status).toBe('done');
+}
+
+describe('Act III — full three-act replay', () => {
+  it('plays all three acts back to back, resets fully clean, and plays through identically a second time', () => {
+    const player = new ScenarioPlayer(buildScenario());
+    const freshSnapshot = player.getSnapshot();
+
+    playThroughAllThreeActs(player);
+
+    player.reset();
+    const resetSnapshot = player.getSnapshot();
+    expect(resetSnapshot).toEqual(freshSnapshot);
+    expect(resetSnapshot.status).toBe('idle');
+    expect(resetSnapshot.railEvents).toEqual([]);
+    expect(resetSnapshot.contextItems).toEqual([]);
+    expect(resetSnapshot.auditEntries).toEqual([]);
+    expect(resetSnapshot.counter).toEqual({ events: 0, violations: 0, flagged: 0 });
+    expect(resetSnapshot.graph.nodeDetails).toEqual({});
+    for (const nodeId of SENTINEL_NODE_IDS) {
+      expect(resetSnapshot.graph.nodes[nodeId]).toBe('idle');
+    }
+
+    // Repeat the identical pass — proves the reset left nothing behind that
+    // would make a second run diverge.
+    playThroughAllThreeActs(player);
+    expect(player.getSnapshot().status).toBe('done');
   });
 });

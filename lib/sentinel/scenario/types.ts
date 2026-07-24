@@ -20,8 +20,8 @@
 // component namespace (RuleDiff et al.) layered on top of v1's registry,
 // which stays untouched. This file only adds the additive envelope types the
 // brief calls out — `graphStep`, `counterUpdate`, `actMarker`, `policyPanel`,
-// `awaitStageAction` — documented as a versioned, additive contract in
-// docs/wire-contract.md §9.
+// `awaitStageAction`, `railReset` (W4.1, brief §3 Act III/§7) — documented as
+// a versioned, additive contract in docs/wire-contract.md §9.
 //
 // `SentinelStageState` is the derived, renderer-friendly snapshot the player
 // exposes via `getSnapshot()` — stage components stay pure renderers of this
@@ -82,13 +82,22 @@ export interface EmitEventStep {
  * replacing the animated-edge set. `animatedEdges`, when present, REPLACES
  * the currently-animated edges wholesale — declarative, not a diff, because
  * the graph renderer holds no logic (brief §4). Omit it to leave the
- * existing edges alone. */
+ * existing edges alone.
+ *
+ * `detail`, when present, is a short per-node activity caption rendered
+ * under the node in place of its state word (e.g. "call 1 · BT event
+ * detail") — brief §3 Act III: "Data Collector fires twice ... visibly two
+ * calls," and a glow pulse alone doesn't read at projector distance. Like
+ * `animatedEdges`, this REPLACES the node's caption wholesale, not a diff:
+ * a `graphStep` WITH `detail` sets it, one WITHOUT `detail` clears it back
+ * to the plain state word (player.ts's `handleGraphStep`). */
 export interface GraphStep {
   type: 'graphStep';
   delayMs: number;
   nodeId: SentinelNodeId;
   nodeState: SentinelNodeState;
   animatedEdges?: SentinelGraphEdge[];
+  detail?: string;
 }
 
 /** Narration text, played back with a typing effect (fixed 3-character
@@ -154,6 +163,22 @@ export interface AwaitStageActionStep {
   action: 'policy-drop';
 }
 
+/** Clears the replay rail — Act III's fresh observation window. Act III
+ * replays the SAME 14 night events Act I already emitted (brief §3: "the
+ * same night replays. Same events, same order, same timestamps"), and
+ * `handleEmitEvent` appends to `railEvents` unconditionally; without an
+ * explicit reset between acts, the rail would carry Act I's 14 cards PLUS
+ * Act III's 14 more — 28 rows, and duplicate `event.eventId` React keys
+ * since it's the same checked-in event list both times. This step clears
+ * ONLY `railEvents`. Zeroing the counter is deliberately NOT this step's
+ * job — that stays `counterUpdate`'s (brief §6's existing declarative
+ * step), an orthogonal concern the Act III scenario pairs alongside this
+ * one rather than folding together. */
+export interface RailResetStep {
+  type: 'railReset';
+  delayMs: number;
+}
+
 export interface SentinelCounter {
   events: number;
   violations: number;
@@ -189,7 +214,8 @@ export type ScenarioStep =
   | CounterUpdateStep
   | AuditWriteStep
   | PolicyPanelStep
-  | AwaitStageActionStep;
+  | AwaitStageActionStep
+  | RailResetStep;
 
 /** Steps that carry `delayMs` — every variant except the three that block
  * instead of waiting (`actMarker`, `awaitApproval`, `awaitStageAction`). */
@@ -218,6 +244,7 @@ export type SentinelStreamMessageBase =
       nodeId: SentinelNodeId;
       nodeState: SentinelNodeState;
       animatedEdges?: SentinelGraphEdge[];
+      detail?: string;
     }
   /** Chunked narration delta — the typing effect. `done` marks the final
    * chunk of this narration id. */
@@ -229,7 +256,8 @@ export type SentinelStreamMessageBase =
   | { type: 'auditWrite'; entry: Omit<EventLogEntry, 'id' | 'timestamp'> }
   | { type: 'policyPanel'; panel: PolicyPanelState }
   | { type: 'stageActionRequest'; id: string; action: 'policy-drop' }
-  | { type: 'stageActionResolved'; id: string };
+  | { type: 'stageActionResolved'; id: string }
+  | { type: 'railReset' };
 
 /** Every message carries a monotonically increasing `seq` — the ordering
  * guarantee downstream consumers (and player.test.ts) rely on. */
@@ -258,6 +286,11 @@ export interface SentinelStageState {
   graph: {
     nodes: Record<SentinelNodeId, SentinelNodeState>;
     animatedEdges: SentinelGraphEdge[];
+    /** Per-node activity caption (GraphStep's `detail` doc comment above) —
+     * a node present here has its caption overridden; a node absent falls
+     * back to its plain state word. Partial, not the full six-node record:
+     * most nodes have no scripted detail most of the time. */
+    nodeDetails: Partial<Record<SentinelNodeId, string>>;
   };
   /** Latest narration text so far — the status ticker mirrors it (brief
    * §4). Grows as `narrationDelta` messages arrive for the in-progress

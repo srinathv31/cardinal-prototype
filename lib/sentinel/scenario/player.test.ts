@@ -640,3 +640,182 @@ describe('ScenarioPlayer — armed node state', () => {
     expect(graphMessages.at(-1)).toMatchObject({ nodeState: 'armed' });
   });
 });
+
+// W4.1 — Act III catch mechanics: `railReset` (types.ts's doc comment: Act
+// III replays the same 14 night events Act I already emitted, so the rail
+// must be cleared between acts or duplicate `event.eventId` React keys and a
+// 28-row rail result) and `graphStep.detail` (the Data Collector double-fire
+// caption, brief §3 Act III step 2).
+
+describe('ScenarioPlayer — railReset', () => {
+  const railResetScenario: SentinelScenario = {
+    id: 'rail-reset-test',
+    steps: [
+      { type: 'actMarker', act: 1, title: 'Act I' },
+      {
+        type: 'emitEvent',
+        delayMs: 10,
+        event: {
+          eventId: 'evt-rail-1',
+          accountId: 'acct-1',
+          kind: 'payment.posted',
+          summary: 'Payment posted — $100.00',
+          timestamp: '2026-01-01T01:00:00.000Z',
+        },
+      },
+      {
+        type: 'emitEvent',
+        delayMs: 10,
+        event: {
+          eventId: 'evt-rail-2',
+          accountId: 'acct-2',
+          kind: 'payment.posted',
+          summary: 'Payment posted — $200.00',
+          timestamp: '2026-01-01T02:00:00.000Z',
+        },
+      },
+      {
+        type: 'counterUpdate',
+        delayMs: 10,
+        counter: { events: 2, violations: 0, flagged: 0 },
+        caption: 'pre-reset caption',
+      },
+      { type: 'graphStep', delayMs: 10, nodeId: 'orchestrator', nodeState: 'working' },
+      { type: 'railReset', delayMs: 10 },
+    ],
+  };
+
+  it('clears railEvents, publishes a railReset message with a monotonic seq, and leaves counter/caption/graph/context untouched', () => {
+    const player = new ScenarioPlayer(railResetScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const snapshot = player.getSnapshot();
+    expect(snapshot.railEvents).toHaveLength(0);
+    // Orthogonal fields — railReset touches ONLY railEvents (types.ts's
+    // RailResetStep doc comment: counter zeroing stays counterUpdate's job).
+    expect(snapshot.counter).toEqual({ events: 2, violations: 0, flagged: 0 });
+    expect(snapshot.counterCaption).toBe('pre-reset caption');
+    expect(snapshot.graph.nodes.orchestrator).toBe('working');
+    expect(snapshot.contextItems).toEqual([]);
+
+    const messages = snapshot.messages;
+    expect(messages.at(-1)).toMatchObject({ type: 'railReset' });
+    // seq is strictly increasing across the whole log, railReset included.
+    messages.forEach((m, i) => expect(m.seq).toBe(i));
+  });
+
+  it('behaves identically inside jumpToAct fast-forward', () => {
+    const jumpRailResetScenario: SentinelScenario = {
+      id: 'jump-rail-reset-test',
+      steps: [
+        { type: 'actMarker', act: 1, title: 'Act I' },
+        {
+          type: 'emitEvent',
+          delayMs: 10,
+          event: {
+            eventId: 'evt-jump-1',
+            accountId: 'acct-1',
+            kind: 'payment.posted',
+            summary: 'Payment posted — $100.00',
+            timestamp: '2026-01-01T01:00:00.000Z',
+          },
+        },
+        {
+          type: 'emitEvent',
+          delayMs: 10,
+          event: {
+            eventId: 'evt-jump-2',
+            accountId: 'acct-2',
+            kind: 'payment.posted',
+            summary: 'Payment posted — $200.00',
+            timestamp: '2026-01-01T02:00:00.000Z',
+          },
+        },
+        { type: 'railReset', delayMs: 10 },
+        { type: 'actMarker', act: 2, title: 'Act II' },
+      ],
+    };
+
+    const player = new ScenarioPlayer(jumpRailResetScenario);
+    player.jumpToAct(2);
+
+    const snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('paused');
+    expect(snapshot.act).toBe(1); // Act I's marker consumed; Act II's left unconsumed
+    expect(vi.getTimerCount()).toBe(0); // instant — no timers involved
+    expect(snapshot.railEvents).toHaveLength(0);
+
+    const types = snapshot.messages.map((m) => m.type);
+    expect(types).toEqual(['actMarker', 'emitEvent', 'emitEvent', 'railReset']);
+  });
+});
+
+function graphStepMessages(messages: SentinelStreamMessage[]) {
+  return messages.filter(
+    (m): m is Extract<SentinelStreamMessage, { type: 'graphStep' }> => m.type === 'graphStep',
+  );
+}
+
+describe('ScenarioPlayer — graphStep detail', () => {
+  const graphDetailScenario: SentinelScenario = {
+    id: 'graph-detail-test',
+    steps: [
+      { type: 'actMarker', act: 3, title: 'Act III' },
+      {
+        type: 'graphStep',
+        delayMs: 10,
+        nodeId: 'data-collector',
+        nodeState: 'working',
+        detail: 'call 1 · BT event detail',
+      },
+      { type: 'graphStep', delayMs: 10, nodeId: 'orchestrator', nodeState: 'working', detail: 'routing' },
+      // No `detail` — clears data-collector's caption per types.ts's
+      // GraphStep doc comment, leaving orchestrator's untouched.
+      { type: 'graphStep', delayMs: 10, nodeId: 'data-collector', nodeState: 'done' },
+    ],
+  };
+
+  it('sets nodeDetails[node] on a graphStep with detail, clears it on one without, and leaves other nodes untouched', () => {
+    const player = new ScenarioPlayer(graphDetailScenario);
+    player.play();
+
+    vi.advanceTimersByTime(10);
+    expect(player.getSnapshot().graph.nodeDetails).toEqual({
+      'data-collector': 'call 1 · BT event detail',
+    });
+
+    vi.advanceTimersByTime(10);
+    expect(player.getSnapshot().graph.nodeDetails).toEqual({
+      'data-collector': 'call 1 · BT event detail',
+      orchestrator: 'routing',
+    });
+
+    vi.advanceTimersByTime(10);
+    expect(player.getSnapshot().graph.nodeDetails).toEqual({ orchestrator: 'routing' });
+  });
+
+  it('reset() clears the nodeDetails map', () => {
+    const player = new ScenarioPlayer(graphDetailScenario);
+    player.play();
+    vi.advanceTimersByTime(10);
+    expect(player.getSnapshot().graph.nodeDetails).toEqual({
+      'data-collector': 'call 1 · BT event detail',
+    });
+
+    player.reset();
+    expect(player.getSnapshot().graph.nodeDetails).toEqual({});
+  });
+
+  it('publishes detail on the graphStep message when present, and omits it when absent', () => {
+    const player = new ScenarioPlayer(graphDetailScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const messages = graphStepMessages(player.getSnapshot().messages);
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toMatchObject({ nodeId: 'data-collector', detail: 'call 1 · BT event detail' });
+    expect(messages[1]).toMatchObject({ nodeId: 'orchestrator', detail: 'routing' });
+    expect(messages[2].detail).toBeUndefined();
+  });
+});

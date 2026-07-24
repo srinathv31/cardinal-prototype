@@ -52,11 +52,44 @@
 // — 1 rule, then 2, then 3, then 3-validated, then 3-active — using the
 // render step's same-id replace-in-place semantics (types.ts, wire-contract
 // §9.2) instead of five separate cards.
+//
+// Act III (brief §3 Act III, ~2.5 min budget, W4.1/W4.2 mechanics + W4.3
+// wiring): the file no longer ends on the Act III marker — this section
+// appends the catch itself, nine phases, commented inline where each
+// starts — restart (`railReset` + a zeroing `counterUpdate`, brief §3's
+// "same night replays") → replay-to-catch (the 14-event loop again, index-
+// aligned with `ACT_III_EVENT_DELAYS_MS`, brisker than Act I because the
+// audience has already sat through this exact night once) → ignition (the
+// graph wakes the instant the catch event lands, mirroring Act II's
+// working→done idiom with `animatedEdges` replacing wholesale) → two-call
+// collection (Data Collector fires twice — BT event detail, then payment
+// history — the double `graphStep.detail` W4.1 built for exactly this) →
+// verdict (Critic renders both R1 — violation — and R2 — pass — so the
+// catch reads as an eligibility breach, not "everything fails") → gate (a
+// real approval, v1 brief §5d, no different from Act II's) → armed (the
+// same six-node settle Act II uses, same order, `orchestrator` first) →
+// rest-of-night (the loop resumes past the catch, Elena's event carrying
+// `complianceBadge` — R3's compliance-pass beat) → close (the finale
+// counter, `violations` derived the same way Act I's was).
+//
+// Two structural inversions worth naming because they're the whole point
+// of Act III existing: (1) `counterUpdate.flagged` tracks `violations`
+// tick-for-tick here — in Act I `flagged` stayed 0 no matter what
+// `violations` counted after the fact, because nothing was watching in
+// real time; here Sentinel catches what it sees, so the two columns move
+// together. (2) `highlight`/`complianceBadge` appear ONLY in this act's
+// `emitEvent` steps — Act I's whole punchline was that Marcus's event
+// scrolled past styled identically to the other 13 (this file's Act I
+// comment above); Act III is that same event, same data, with the judgment
+// now visible. `violations` is computed once from `replayEvents` (same
+// `kind === 'balance_transfer.initiated'` filter Act I's counter uses) and
+// reused for both acts' finales — one fact, hand-reconcilable, cited twice.
 
-import type { ScenarioStep, SentinelScenario } from './types';
-import type { StreamEvent } from '@/lib/soe/types';
+import type { EmitEventStep, ScenarioStep, SentinelScenario } from './types';
+import type { BalanceTransferEvent, Payment, StreamEvent } from '@/lib/soe/types';
 import type { PolicyDocument, PolicyRule } from '@/lib/sentinel/policy';
 import type { RuleDiffProps } from '@/lib/sentinel/registry';
+import { formatCurrency, formatDate } from '@/lib/agents/format';
 
 /** Per-event pacing for Act I's replay, index-aligned with the 14-event
  * replay log's ascending-timestamp order. Fixed literals only (brief §8:
@@ -76,6 +109,67 @@ const ACT_I_FINALE_CAPTION = 'Detected day 4 by manual sampling — if at all.';
  * stitching the policy-intake story together on the shared Event Log
  * exactly like a v1 agent run does (wire-contract §5). */
 const RUN_ID = 'sentinel-demo-act2';
+
+/** Act III's run id — a fresh run for the catch, start to finish, separate
+ * from Act II's `RUN_ID` (brief §5e: every step logs against a `runId`,
+ * and this one is a different investigation). */
+const ACT_III_RUN_ID = 'sentinel-demo-act3';
+
+/** Per-event pacing for Act III's replay of the SAME 14-event night
+ * (`ACT_I_EVENT_DELAYS_MS`'s sibling table, index-aligned the same way) —
+ * brisker than Act I's, on purpose: the audience just watched this exact
+ * night once already, so the replay moves faster. Fixed literals only
+ * (brief §8). */
+const ACT_III_EVENT_DELAYS_MS = [
+  1100, 1400, 1500, 1400, 1600, 1500, 1400, 1600, 2000, 1700, 1500, 1600, 1500, 1400,
+] as const;
+
+/** Elena's "quiet green check" beat (brief §3 Act III bonus beat) — the
+ * ONLY `complianceBadge` in the whole scenario. */
+const ACT_III_COMPLIANCE_BADGE = 'R3 satisfied — 45-day notice on record';
+
+const ACT_III_CLOSING_CAPTION = 'Caught in seconds · human-approved response · full audit trail.';
+
+const DAY_MS = 86_400_000;
+
+/** Whole days between two ISO date/timestamp strings, date-part only, UTC.
+ * Deliberately NOT `daysSince`/`daysUntil` (lib/agents/format.ts) — those
+ * measure against the demo anchor ("today"); this measures between two
+ * arbitrary dates already present in the data
+ * (`missedPayment.dueDate` → `btEvent.timestamp`), so it takes both
+ * endpoints as arguments instead of reading the anchor. */
+function wholeDaysBetween(fromIso: string, toIso: string): number {
+  const from = Date.parse(`${fromIso.slice(0, 10)}T00:00:00.000Z`);
+  const to = Date.parse(`${toIso.slice(0, 10)}T00:00:00.000Z`);
+  return Math.round((to - from) / DAY_MS);
+}
+
+/**
+ * Maps `payments` (most-recent-first — the adapter's `getPayments` sort) to
+ * `PaymentHistoryTable` rows exactly like payment-health's private
+ * `resolvePaymentHistory`/`flagPayment` helpers (lib/agents/payment-health/
+ * resolvers.ts) — trailing 4 statements, so the missed payment (always the
+ * most recent one in this fixture) lands in the window. Not imported from
+ * there: those helpers aren't exported, and re-deriving four lines here
+ * keeps this file's zero-data-access-surface contract (header comment)
+ * intact rather than reaching into another agent's module.
+ */
+function mapPaymentRows(payments: Payment[]) {
+  return payments.slice(0, 4).map((p) => ({
+    dueDate: formatDate(p.dueDate),
+    amountDue: formatCurrency(p.amountDue),
+    minimumDue: formatCurrency(p.minimumDue),
+    amountPaid: formatCurrency(p.amountPaid),
+    status: p.status,
+    channel: p.channel,
+    flag:
+      p.status === 'MISSED'
+        ? ('missed' as const)
+        : p.amountPaid > 0 && p.amountPaid <= p.minimumDue + 0.005
+          ? ('minimum-only' as const)
+          : undefined,
+  }));
+}
 
 /** The Rule Diff card's fixed title (brief §3 Act II beat 3) — same string
  * at every phase, only `status`/`rules` change as the card re-renders under
@@ -138,12 +232,19 @@ function buildRuleDiff(
 
 /**
  * Builds the checked-in Sentinel demo scenario. Act I plays start to
- * finish, then Act II's policy-to-production sequence, ending paused at the
- * Act III marker; P4 extends `steps` with Act III's content.
+ * finish, then Act II's policy-to-production sequence, then Act III's
+ * investigation and catch — `steps` now ends on Act III's closing
+ * narration, not on its marker (this file's header comment has the full
+ * nine-phase breakdown). `actIII` is required, not optional: the demo path
+ * always has this data (app/sentinel/page.tsx's sole call site fetches it
+ * unconditionally), and making it required here means a missing fetch
+ * fails at the call site's type-check rather than silently dropping Act III
+ * at runtime.
  */
 export function buildDemoScenario(data: {
   replayEvents: StreamEvent[];
   policy: { document: PolicyDocument; rules: PolicyRule[] };
+  actIII: { btEvent: BalanceTransferEvent; payments: Payment[]; partyName: string };
 }): SentinelScenario {
   const { replayEvents, policy } = data;
 
@@ -457,6 +558,508 @@ export function buildDemoScenario(data: {
   });
 
   steps.push({ type: 'actMarker', act: 3, title: 'Act III — The catch' });
+
+  // ---------------------------------------------------------------------
+  // Act III — The catch (brief §3 Act III). Nine phases (file header):
+  // restart → replay-to-catch → ignition → two-call collection → verdict →
+  // gate → armed → rest-of-night → close.
+  // ---------------------------------------------------------------------
+
+  const { btEvent, payments, partyName } = data.actIII;
+  const accountId = btEvent.accountId;
+
+  const missedPayment = payments.find((p) => p.status === 'MISSED');
+  if (!missedPayment) {
+    throw new Error('buildDemoScenario: Act III requires a MISSED payment in actIII.payments');
+  }
+  const daysBeforeInitiation = wholeDaysBetween(missedPayment.dueDate, btEvent.timestamp);
+
+  if (btEvent.btCreditLineAtInitiation === undefined) {
+    throw new Error(
+      'buildDemoScenario: Act III requires btEvent.btCreditLineAtInitiation for the R2 sizing check',
+    );
+  }
+  const btCreditLine = btEvent.btCreditLineAtInitiation;
+  const sizingCapAmount = 0.9 * btCreditLine;
+
+  const catchIndex = replayEvents.findIndex((e) => e.kind === 'balance_transfer.initiated');
+  const elenaIndex = replayEvents.findIndex((e) => e.kind === 'bt.promo_expiring');
+  if (catchIndex === -1) {
+    throw new Error('buildDemoScenario: Act III requires a balance_transfer.initiated event in replayEvents');
+  }
+  if (elenaIndex === -1) {
+    throw new Error('buildDemoScenario: Act III requires a bt.promo_expiring event in replayEvents');
+  }
+
+  const rule1 = policy.rules.find((r) => r.ruleId === 'R1');
+  const rule2 = policy.rules.find((r) => r.ruleId === 'R2');
+  if (!rule1 || !rule2) {
+    throw new Error('buildDemoScenario: Act III requires both R1 and R2 in policy.rules');
+  }
+
+  // `violations` is the SAME derivation Act I's finale counter used above
+  // (`kind === 'balance_transfer.initiated'`) — one fact, computed once,
+  // cited by both acts' closing counters (brief v2 §5's hand-reconcilable
+  // arithmetic rule).
+  const transferAmountFmt = formatCurrency(btEvent.transferAmount);
+  const missedMinimumFmt = formatCurrency(missedPayment.minimumDue);
+  const missedDueDateFmt = formatDate(missedPayment.dueDate);
+
+  // Phase: replay restart — a fresh observation window. Without `railReset`
+  // the rail would carry Act I's 14 cards plus Act III's 14 more (types.ts's
+  // `RailResetStep` doc comment: 28 rows, duplicate `eventId` React keys).
+  // The zeroing `counterUpdate` right behind it carries no caption, so the
+  // header reads as reset, not as a new milestone — Act I's finale card
+  // (caption included) is what it's clearing.
+  steps.push({ type: 'railReset', delayMs: 400 });
+  steps.push({ type: 'counterUpdate', delayMs: 0, counter: { events: 0, violations: 0, flagged: 0 } });
+  steps.push({
+    type: 'narration',
+    delayMs: 300,
+    id: 'n3-replay',
+    text: 'Replaying the night — same fourteen events, same order, same timestamps. R1–R3 are live this time.',
+  });
+
+  // Phase: the night again — same 14-event loop Act I used, index-aligned
+  // with `ACT_III_EVENT_DELAYS_MS` instead of Act I's table. `flagged`
+  // mirrors `violations` at every tick this time (the header comment's
+  // inversion #1: nothing was watching in Act I, so `flagged` sat at 0 no
+  // matter what `violations` counted after the fact; here Sentinel catches
+  // what it sees). The catch event (Marcus, 02:47) carries `highlight:
+  // true` and, the instant its counter lands, the entire investigation →
+  // gate → armed sequence runs before the loop resumes one line below —
+  // the rail visibly stops mid-night. Elena's event carries
+  // `complianceBadge` plus a narration beat right behind it.
+  replayEvents.forEach((event, i) => {
+    const isCatch = i === catchIndex;
+    const isElena = i === elenaIndex;
+    const violationsSoFar = replayEvents
+      .slice(0, i + 1)
+      .filter((e) => e.kind === 'balance_transfer.initiated').length;
+
+    const emitStep: EmitEventStep = {
+      type: 'emitEvent',
+      delayMs: ACT_III_EVENT_DELAYS_MS[i],
+      event,
+    };
+    if (isCatch) emitStep.highlight = true;
+    if (isElena) emitStep.complianceBadge = ACT_III_COMPLIANCE_BADGE;
+    steps.push(emitStep);
+
+    steps.push({
+      type: 'counterUpdate',
+      delayMs: 0,
+      counter: { events: i + 1, violations: violationsSoFar, flagged: violationsSoFar },
+    });
+
+    if (isElena) {
+      steps.push({
+        type: 'narration',
+        delayMs: 300,
+        id: 'n3-elena',
+        text:
+          "Elena Ruiz's promo expiry passes R3 — 60 days' notice on record against a 45-day floor. Sentinel verifies compliance, not just violations.",
+      });
+    }
+
+    if (!isCatch) return;
+
+    // ---------------------------------------------------------------
+    // Phase: ignition + investigation — mirrors Act II's working→done
+    // graph idiom, `animatedEdges` replacing wholesale (types.ts's
+    // `GraphStep` doc comment).
+    // ---------------------------------------------------------------
+    steps.push({
+      type: 'graphStep',
+      delayMs: 250,
+      nodeId: 'orchestrator',
+      nodeState: 'working',
+      animatedEdges: [],
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 300,
+      id: 'n3-catch',
+      text: `02:47 — balance_transfer.initiated on ${accountId}. R1 matched on its evaluation trigger. Opening an investigation.`,
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 400,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-orchestrator',
+        step: -1,
+        kind: 'run.started',
+        actor: 'agent',
+        inputSummary: `balance_transfer.initiated at 02:47 on ${accountId}`,
+        outputSummary: 'R1 investigation opened — seconds after initiation',
+      },
+    });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'policy-analyst',
+      nodeState: 'working',
+      animatedEdges: [{ from: 'orchestrator', to: 'policy-analyst' }],
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 400,
+      id: 'n3-cite',
+      text: `Policy Analyst cites R1 — ${stripRuleIdPrefix(rule1)}: ${rule1.plainEnglish} Two conditions to verify — one on this event, one across payment history.`,
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 600,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-policy-analyst',
+        step: 0,
+        toolName: 'match_rules',
+        kind: 'step.completed',
+        actor: 'agent',
+        inputSummary: 'balance_transfer.initiated vs 3 active rules',
+        outputSummary: 'R1 matched — cross-dataset check required',
+      },
+    });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'policy-analyst',
+      nodeState: 'done',
+      animatedEdges: [{ from: 'policy-analyst', to: 'data-collector' }],
+    });
+
+    // Data Collector — visibly two calls (brief §3: "fires twice ...
+    // because R1 is a cross-dataset rule"). The `done` graphStep between
+    // the two `working` calls drops the glow so they read as two distinct
+    // firings, not one continuous spin.
+    steps.push({
+      type: 'graphStep',
+      delayMs: 250,
+      nodeId: 'data-collector',
+      nodeState: 'working',
+      detail: 'call 1 · BT event detail',
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 300,
+      id: 'n3-fetch1',
+      text: 'Data Collector — first call: the balance-transfer event itself.',
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 700,
+      id: 'act3-bt-detail',
+      instruction: {
+        component: 'BTEventDetail',
+        props: {
+          title: 'Balance transfer initiated',
+          account: `${partyName} · ${accountId}`,
+          amount: transferAmountFmt,
+          timestamp: `02:47 UTC · ${formatDate(btEvent.timestamp)}`,
+          tone: 'critical',
+          attributes: [
+            { label: 'Promo APR', value: `${btEvent.promoApr}%` },
+            { label: 'Go-to APR', value: `${btEvent.goToApr}%` },
+            { label: 'BT credit line at initiation', value: formatCurrency(btCreditLine) },
+            { label: 'Event id', value: btEvent.eventId },
+          ],
+        },
+      },
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 400,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-data-collector',
+        step: 1,
+        toolName: 'fetch_bt_event',
+        kind: 'tool.executed',
+        actor: 'agent',
+        inputSummary: `${btEvent.eventId} detail`,
+        outputSummary: `${transferAmountFmt} initiated 02:47 · BT line ${formatCurrency(btCreditLine)}`,
+      },
+    });
+    steps.push({ type: 'graphStep', delayMs: 500, nodeId: 'data-collector', nodeState: 'done' });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 350,
+      nodeId: 'data-collector',
+      nodeState: 'working',
+      detail: 'call 2 · payment history',
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 300,
+      id: 'n3-fetch2',
+      text: 'Second call: payment history. R1 is a cross-dataset rule — the look-back window is 60 days.',
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 700,
+      id: 'act3-payments',
+      instruction: {
+        component: 'PaymentHistoryTable',
+        props: {
+          title: `Payment history — ${accountId}`,
+          rows: mapPaymentRows(payments),
+        },
+      },
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 400,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-data-collector',
+        step: 2,
+        toolName: 'fetch_payment_history',
+        kind: 'tool.executed',
+        actor: 'agent',
+        inputSummary: `60-day look-back on ${accountId}`,
+        outputSummary: `Missed payment found — minimum ${missedMinimumFmt} due ${missedDueDateFmt}, ${daysBeforeInitiation} days before initiation`,
+      },
+    });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 400,
+      nodeId: 'data-collector',
+      nodeState: 'done',
+      animatedEdges: [{ from: 'data-collector', to: 'critic' }],
+    });
+
+    // Critic + verdict — R1 violates, R2 passes, so the catch reads as an
+    // eligibility breach specifically, not "everything fails everything"
+    // (brief §5's R2 note).
+    steps.push({ type: 'graphStep', delayMs: 250, nodeId: 'critic', nodeState: 'working' });
+    steps.push({
+      type: 'narration',
+      delayMs: 350,
+      id: 'n3-critic',
+      text: "Critic evaluating R1's two conditions — and running R2's sizing check while the event is open.",
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 800,
+      id: 'act3-r1',
+      instruction: {
+        component: 'RuleCitation',
+        props: {
+          ruleId: 'R1',
+          title: stripRuleIdPrefix(rule1),
+          ruleText: rule1.plainEnglish,
+          verdict: 'violation',
+          checks: [
+            {
+              label: 'Balance transfer initiated on the account',
+              detail: `${transferAmountFmt} at 02:47 today`,
+              met: true,
+            },
+            {
+              label: 'Missed payment within the 60-day look-back',
+              detail: `Minimum ${missedMinimumFmt} due ${missedDueDateFmt} — ${daysBeforeInitiation} days before initiation`,
+              met: true,
+            },
+          ],
+        },
+      },
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 900,
+      id: 'act3-r2',
+      instruction: {
+        component: 'RuleCitation',
+        props: {
+          ruleId: 'R2',
+          title: stripRuleIdPrefix(rule2),
+          ruleText: rule2.plainEnglish,
+          verdict: 'pass',
+          checks: [
+            {
+              label: 'Principal within 90% of the balance-transfer credit line',
+              detail: `${transferAmountFmt} ≤ ${formatCurrency(sizingCapAmount)} (90% of ${formatCurrency(btCreditLine)})`,
+              met: true,
+            },
+          ],
+        },
+      },
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 400,
+      id: 'n3-verdict',
+      text: "R1 violated — both conditions met. R2 passes — the principal is inside the sizing limit. This is an eligibility breach, not a sizing breach.",
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 500,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-critic',
+        step: 3,
+        toolName: 'evaluate_rules',
+        kind: 'step.completed',
+        actor: 'agent',
+        inputSummary: `R1, R2 against ${btEvent.eventId}`,
+        outputSummary: 'R1 violation confirmed · R2 pass',
+      },
+    });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'critic',
+      nodeState: 'done',
+      animatedEdges: [{ from: 'critic', to: 'approval-gate' }],
+    });
+
+    // Proposed action + the gate — a real human pause (v1 brief §5d: no
+    // auto-approve paths, no timeouts).
+    steps.push({
+      type: 'narration',
+      delayMs: 350,
+      id: 'n3-proposal',
+      text: 'Proposed action: hold the transfer for review, notify servicing ops, file the case summary. Nothing executes without approval.',
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 600,
+      id: 'act3-case',
+      instruction: {
+        component: 'MetricRow',
+        props: {
+          metrics: [
+            { label: 'Rule', value: 'R1 violation', tone: 'critical' },
+            { label: 'Amount held', value: transferAmountFmt, tone: 'neutral' },
+            { label: 'Detected', value: 'In seconds', delta: 'flagged at 02:47', tone: 'positive' },
+          ],
+        },
+      },
+    });
+    steps.push({
+      type: 'render',
+      delayMs: 700,
+      id: 'act3-notify',
+      instruction: {
+        component: 'OutreachDraftCard',
+        props: {
+          channel: 'EMAIL',
+          to: 'servicing-ops@cardinal.example',
+          subject: `Hold pending review — balance transfer on ${accountId}`,
+          body: `A balance transfer of ${transferAmountFmt} initiated at 02:47 UTC on ${accountId} was flagged by rule R1 (New Transfer Eligibility Window).\n\nA missed payment (${missedMinimumFmt} minimum due ${missedDueDateFmt}) falls ${daysBeforeInitiation} days before initiation — inside the 60-day look-back. The transfer is held pending review; it will not post while the hold is active.\n\nCase file: BT event detail, 60-day payment history, R1/R2 evaluation.`,
+        },
+      },
+    });
+    steps.push({
+      type: 'awaitApproval',
+      id: 'act3-hold',
+      payload: {
+        approvalId: 'act3-hold',
+        toolName: 'hold_balance_transfer',
+        title: 'Hold balance transfer for review',
+        description: `Place a servicing hold on the ${transferAmountFmt} transfer on ${accountId} and send the ops notification. The transfer does not post while the hold is active.`,
+        rationale:
+          "R1 violation confirmed across two datasets; R2 sizing passes. A hold is reversible and preserves the customer's request while eligibility is reviewed.",
+        evidence: [
+          'BT event detail',
+          'Payment history — 60-day look-back',
+          'Rule R1 citation — violation',
+          'Rule R2 check — pass',
+        ],
+      },
+      audit: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-approval-gate',
+        step: 4,
+        toolName: 'hold_balance_transfer',
+        inputSummary: `Hold ${transferAmountFmt} transfer on ${accountId} + notify ops`,
+        outputSummary: 'Human decision recorded at the enforcement gate',
+      },
+    });
+    steps.push({
+      type: 'graphStep',
+      delayMs: 300,
+      nodeId: 'approval-gate',
+      nodeState: 'done',
+      animatedEdges: [],
+    });
+    steps.push({
+      type: 'auditWrite',
+      delayMs: 400,
+      entry: {
+        runId: ACT_III_RUN_ID,
+        agentId: 'sentinel-orchestrator',
+        step: 5,
+        toolName: 'hold_balance_transfer',
+        kind: 'action.executed',
+        actor: 'agent',
+        inputSummary: `Hold on ${btEvent.eventId} + ops notification`,
+        outputSummary: 'Hold active — transfer will not post · ops notified',
+      },
+    });
+    steps.push({
+      type: 'narration',
+      delayMs: 350,
+      id: 'n3-executed',
+      text: 'Hold active. Ops notified. Every step of this catch is already on the audit trail.',
+    });
+
+    // Phase: back to watching — all six nodes settle to armed, same
+    // cadence Act II's armed phase uses (orchestrator first, then the
+    // other five at 150ms each, same order).
+    steps.push({ type: 'graphStep', delayMs: 400, nodeId: 'orchestrator', nodeState: 'armed' });
+    steps.push({ type: 'graphStep', delayMs: 150, nodeId: 'policy-analyst', nodeState: 'armed' });
+    steps.push({ type: 'graphStep', delayMs: 150, nodeId: 'rule-engineer', nodeState: 'armed' });
+    steps.push({ type: 'graphStep', delayMs: 150, nodeId: 'data-collector', nodeState: 'armed' });
+    steps.push({ type: 'graphStep', delayMs: 150, nodeId: 'critic', nodeState: 'armed' });
+    steps.push({ type: 'graphStep', delayMs: 150, nodeId: 'approval-gate', nodeState: 'armed' });
+    // The forEach loop resumes right after this point, at i = catchIndex + 1
+    // — "the rest of the night" phase (header comment), Elena's event among
+    // them.
+  });
+
+  // Phase: close.
+  steps.push({
+    type: 'auditWrite',
+    delayMs: 400,
+    entry: {
+      runId: ACT_III_RUN_ID,
+      agentId: 'sentinel-orchestrator',
+      step: -1,
+      kind: 'run.finished',
+      actor: 'agent',
+      outputSummary: 'Night replay complete — 1 violation caught, held, and dispositioned',
+    },
+  });
+  steps.push({
+    type: 'counterUpdate',
+    delayMs: 1800,
+    counter: { events: replayEvents.length, violations, flagged: violations },
+    caption: ACT_III_CLOSING_CAPTION,
+  });
+  steps.push({
+    type: 'render',
+    delayMs: 600,
+    id: 'act3-counter',
+    instruction: {
+      component: 'MetricRow',
+      props: {
+        metrics: [
+          { label: 'Events', value: String(replayEvents.length), tone: 'neutral' },
+          { label: 'Violations caught', value: String(violations), delta: 'in seconds, not days', tone: 'positive' },
+          { label: 'Audit trail', value: 'Complete', delta: 'human-approved', tone: 'positive' },
+        ],
+      },
+    },
+  });
+  steps.push({
+    type: 'narration',
+    delayMs: 400,
+    id: 'n3-close',
+    text: 'Same night. Same events. This time the 2:47 AM transfer never slipped past.',
+  });
 
   return { id: 'sentinel-demo', steps };
 }

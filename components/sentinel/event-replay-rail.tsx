@@ -119,33 +119,62 @@ export function EventReplayRail({ events, counter, caption }: EventReplayRailPro
             </div>
           ) : null}
 
-          {newestFirst.map(({ event, highlight, complianceBadge }) => (
-            <div
-              key={event.eventId}
-              className={cn(
-                "animate-in fade-in slide-in-from-top-2 flex flex-col gap-1.5 rounded-xl border border-border bg-card/60 px-4 py-3 ring-1 ring-foreground/5 duration-500",
-                highlight && "ring-2 ring-destructive bg-destructive/10",
-              )}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-semibold",
-                    KIND_TONE[event.kind] ?? "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {KIND_LABEL[event.kind] ?? event.kind}
-                </span>
-                <span className="font-mono text-sm text-muted-foreground">
-                  {formatClockTime(event.timestamp)}
-                </span>
+          {newestFirst.map(({ event, highlight, complianceBadge }) => {
+            const cardClassName = cn(
+              "animate-in fade-in slide-in-from-top-2 flex flex-col gap-1.5 rounded-xl border border-border bg-card/60 px-4 py-3 ring-1 ring-foreground/5 duration-500",
+              highlight && "ring-2 ring-destructive bg-destructive/10",
+            );
+            const cardBody = (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-semibold",
+                      KIND_TONE[event.kind] ?? "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {KIND_LABEL[event.kind] ?? event.kind}
+                  </span>
+                  <span className="font-mono text-sm text-muted-foreground">
+                    {formatClockTime(event.timestamp)}
+                  </span>
+                </div>
+                <p className="text-base text-foreground">{event.summary}</p>
+                {complianceBadge ? (
+                  <p className="text-sm text-success">✓ {complianceBadge}</p>
+                ) : null}
+              </>
+            );
+
+            // Every non-highlight card renders exactly as before — the same
+            // single div, same className, same key placement.
+            // Pixel-identical to the pre-Act-III treatment.
+            if (!highlight) {
+              return (
+                <div key={event.eventId} className={cardClassName}>
+                  {cardBody}
+                </div>
+              );
+            }
+
+            // Act III's catch (brief §3): the Marcus card "stops mid-rail
+            // and highlights" — the hero beat of the whole demo, so the
+            // static ring/tint alone reads too quiet at projector distance.
+            // Wrapped in `relative` so the glow layer can sit BEHIND the
+            // card via absolute positioning (working-glow idiom,
+            // live-agent-graph.tsx's `SentinelAgentNode`) — only the glow
+            // pulses (`animate-pulse` on a `-z-10` layer), never the card's
+            // own content, so the event text stays legible while it holds.
+            return (
+              <div key={event.eventId} className="relative">
+                <div
+                  className="absolute -inset-1 -z-10 animate-pulse rounded-xl bg-destructive/25 blur-md"
+                  aria-hidden="true"
+                />
+                <div className={cardClassName}>{cardBody}</div>
               </div>
-              <p className="text-base text-foreground">{event.summary}</p>
-              {complianceBadge ? (
-                <p className="text-sm text-success">✓ {complianceBadge}</p>
-              ) : null}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

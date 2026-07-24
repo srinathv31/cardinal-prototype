@@ -39,7 +39,10 @@ they are additive (documented in `docs/wire-contract.md` §9):
   assigns on append);
 - `emitEvent` — `StreamEvent` from `lib/soe/types.ts`;
 - **additive envelope types**: `graphStep` (node/edge state transitions for
-  the live agent graph), `counterUpdate` (replay-rail counter), `actMarker`.
+  the live agent graph; P4 adds its optional `detail` activity caption),
+  `counterUpdate` (replay-rail counter), `actMarker`, `policyPanel` +
+  `awaitStageAction` (P3, the Act II drawer and mock file-drop gate), and
+  `railReset` (P4, Act III's fresh replay window).
 
 This message union **is the spec the post-review real runtime must emit**
 (brief §6, §10) — renderers consume only these messages.
@@ -49,7 +52,7 @@ This message union **is the spec the post-review real runtime must emit**
 | Area | Files |
 |---|---|
 | ScenarioPlayer engine | `lib/sentinel/scenario/types.ts` (step + message unions), `lib/sentinel/scenario/player.ts`, tests, smoke scenario |
-| Sentinel-stage component schemas | `lib/sentinel/registry.ts` — `RuleDiff` and the `SentinelRenderInstruction` union (`RenderInstruction` ∪ Sentinel-only components); additive component namespace layered on the untouched v1 registry, per `docs/wire-contract.md` §9.6 |
+| Sentinel-stage component schemas | `lib/sentinel/registry.ts` — `RuleDiff` (P3), `BTEventDetail` + `RuleCitation` (P4, Act III evidence) and the `SentinelRenderInstruction` union (`RenderInstruction` ∪ Sentinel-only components); additive component namespace layered on the untouched v1 registry, per `docs/wire-contract.md` §9.6 |
 | Policy content & rule fixtures | `lib/sentinel/policy.ts` (BT-Servicing-Policy-2026 sections with excerpt anchors; rules R1/R2/R3 with plain-English text + machine footers + critic note) |
 | Sentinel seed additions | `lib/soe/seed/sentinel.ts` — Marcus `BT_INITIATED` ($3,200 @ 02:47, day 0), Elena promo-notice record, the 14-event replay log ("the night") |
 | Audit ingestion | `app/api/sentinel/audit/route.ts` — POST appends a Sentinel `EventLogEntry` to `lib/events/store` so the shared Event Log sees it |
