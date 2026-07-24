@@ -26,6 +26,8 @@ function statusLabel(status: SentinelStageState["status"], act: SentinelStageSta
       return act === 0 ? "Paused" : `Act ${act} · Paused`;
     case "awaiting-approval":
       return "Awaiting approval";
+    case "awaiting-stage-action":
+      return "Awaiting presenter";
     case "done":
       return "Complete";
   }
@@ -74,7 +76,11 @@ export function PresenterBar({
 
   if (!visible) return null;
 
-  const playDisabled = status === "playing" || status === "awaiting-approval" || status === "done";
+  const playDisabled =
+    status === "playing" ||
+    status === "awaiting-approval" ||
+    status === "awaiting-stage-action" ||
+    status === "done";
   const pauseDisabled = status !== "playing";
   const otherSpeed = speed === 1 ? 2 : 1;
 

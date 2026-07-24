@@ -22,11 +22,21 @@
 // there's nothing for the fetch to feed). The audience never sees this
 // query string; any other value or its absence is the exact demo path
 // above, untouched.
+//
+// P3 adds the policy fixtures: `policyDocument`/`policyRules`
+// (lib/sentinel/policy.ts) are checked-in content, not seed data — the "all
+// data access goes through lib/soe" rule (CLAUDE.md) governs seed data
+// specifically, and the policy document/rules are static fixtures imported
+// directly here, same as demo-scenario.ts itself. They feed
+// `buildDemoScenario`'s Act II sequence and, unconditionally, `<Stage>`'s
+// `policyDocument` prop (both call sites below) — the Policy Panel needs the
+// document to render its preview regardless of which scenario is loaded.
 
 import { Stage } from "@/components/sentinel/stage";
 import { getSentinelReplayLog } from "@/lib/soe";
 import { buildDemoScenario } from "@/lib/sentinel/scenario/demo-scenario";
 import { graphRehearsalScenario } from "@/lib/sentinel/scenario/graph-rehearsal";
+import { policyDocument, policyRules } from "@/lib/sentinel/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -41,11 +51,14 @@ export default async function SentinelPage({
   const scenarioName = Array.isArray(scenarioParam) ? scenarioParam[0] : scenarioParam;
 
   if (scenarioName === "graph-rehearsal") {
-    return <Stage scenario={graphRehearsalScenario} />;
+    return <Stage scenario={graphRehearsalScenario} policyDocument={policyDocument} />;
   }
 
   const replayEvents = await getSentinelReplayLog();
-  const scenario = buildDemoScenario({ replayEvents });
+  const scenario = buildDemoScenario({
+    replayEvents,
+    policy: { document: policyDocument, rules: policyRules },
+  });
 
-  return <Stage scenario={scenario} />;
+  return <Stage scenario={scenario} policyDocument={policyDocument} />;
 }

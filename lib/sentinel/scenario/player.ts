@@ -24,10 +24,12 @@ import type {
   ActMarkerStep,
   AuditWriteStep,
   AwaitApprovalStep,
+  AwaitStageActionStep,
   CounterUpdateStep,
   EmitEventStep,
   GraphStep,
   NarrationStep,
+  PolicyPanelStep,
   RenderStep,
   ScenarioTimedStep,
   SentinelContextItem,
@@ -61,7 +63,13 @@ function idleGraphNodes(): Record<SentinelNodeId, SentinelNodeState> {
   return nodes;
 }
 
-type InstantStep = EmitEventStep | GraphStep | RenderStep | CounterUpdateStep | AuditWriteStep;
+type InstantStep =
+  | EmitEventStep
+  | GraphStep
+  | RenderStep
+  | CounterUpdateStep
+  | AuditWriteStep
+  | PolicyPanelStep;
 
 export class ScenarioPlayer {
   private readonly scenario: SentinelScenario;
@@ -77,6 +85,7 @@ export class ScenarioPlayer {
   private waitArmedAt: number | null = null;
   private onWaitComplete: (() => void) | null = null;
   private pendingApproval: AwaitApprovalStep | null = null;
+  private pendingStageAction: AwaitStageActionStep | null = null;
 
   // Derived state (mirrors SentinelStageState field-for-field; see commit()).
   private status: SentinelStageState['status'] = 'idle';
@@ -92,6 +101,7 @@ export class ScenarioPlayer {
   private auditEntries: SentinelStageState['auditEntries'] = [];
   private messages: SentinelStreamMessage[] = [];
   private seq = 0;
+  private policyPanel: SentinelStageState['policyPanel'] = 'closed';
 
   private snapshot: SentinelStageState;
 
@@ -106,7 +116,12 @@ export class ScenarioPlayer {
   // ---------------------------------------------------------------------
 
   play(): void {
-    if (this.status === 'playing' || this.status === 'done' || this.status === 'awaiting-approval') {
+    if (
+      this.status === 'playing' ||
+      this.status === 'done' ||
+      this.status === 'awaiting-approval' ||
+      this.status === 'awaiting-stage-action'
+    ) {
       return; // guard against double-play and against resuming states that aren't resumable this way
     }
 
@@ -167,7 +182,9 @@ export class ScenarioPlayer {
    * and any `awaitApproval` encountered along the way is auto-resolved as
    * approved (publishing `approvalRequest` + `approvalResolved` +
    * the derived `auditWrite` back-to-back) — there's no presenter around to
-   * click through a rehearsal. Earlier `actMarker`s are consumed (and
+   * click through a rehearsal. Likewise, any `awaitStageAction` is
+   * auto-resolved (publishing `stageActionRequest` + `stageActionResolved`
+   * back-to-back), same rationale. Earlier `actMarker`s are consumed (and
    * published) exactly as normal playback would; the TARGET marker for
    * `act` is left unconsumed so the player "ends paused at the marker" —
    * identical to how a live run pauses at an act boundary, just arrived at
@@ -189,6 +206,16 @@ export class ScenarioPlayer {
       if (step.type === 'awaitApproval') {
         this.handleApprovalRequest(step);
         this.handleApprovalResolution(step, true);
+        this.stepIndex++;
+        continue;
+      }
+
+      if (step.type === 'awaitStageAction') {
+        // No presenter around to click through a rehearsal — same rationale
+        // as the approval auto-resolve above: publish the request and its
+        // resolution back-to-back and keep fast-forwarding.
+        this.publish({ type: 'stageActionRequest', id: step.id, action: step.action });
+        this.publish({ type: 'stageActionResolved', id: step.id });
         this.stepIndex++;
         continue;
       }
@@ -229,6 +256,24 @@ export class ScenarioPlayer {
     this.advance();
   }
 
+  /** No-op unless this stage action is the one currently pending — mirrors
+   * `resolveApproval`. */
+  resolveStageAction(id: string): void {
+    if (
+      this.status !== 'awaiting-stage-action' ||
+      this.pendingStageAction === null ||
+      this.pendingStageAction.id !== id
+    ) {
+      return;
+    }
+    this.pendingStageAction = null;
+    this.publish({ type: 'stageActionResolved', id });
+    this.stepIndex++;
+    this.status = 'playing';
+    this.commit();
+    this.advance();
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -245,9 +290,10 @@ export class ScenarioPlayer {
   // ---------------------------------------------------------------------
 
   /** Looks at the step currently under the cursor and decides what to do:
-   * finish the run, pause at a marker, block on an approval, or schedule
-   * the wait for a timed step. Called after every step completes, after a
-   * marker is consumed, and after an approval resolves. */
+   * finish the run, pause at a marker, block on an approval or stage
+   * action, or schedule the wait for a timed step. Called after every step
+   * completes, after a marker is consumed, and after an approval or stage
+   * action resolves. */
   private advance(): void {
     if (this.stepIndex >= this.scenario.steps.length) {
       this.status = 'done';
@@ -267,6 +313,14 @@ export class ScenarioPlayer {
       this.handleApprovalRequest(step);
       this.pendingApproval = step;
       this.status = 'awaiting-approval';
+      this.commit();
+      return;
+    }
+
+    if (step.type === 'awaitStageAction') {
+      this.publish({ type: 'stageActionRequest', id: step.id, action: step.action });
+      this.pendingStageAction = step;
+      this.status = 'awaiting-stage-action';
       this.commit();
       return;
     }
@@ -299,6 +353,9 @@ export class ScenarioPlayer {
         return;
       case 'auditWrite':
         this.handleAuditWrite(step);
+        return;
+      case 'policyPanel':
+        this.handlePolicyPanel(step);
         return;
     }
   }
@@ -433,9 +490,17 @@ export class ScenarioPlayer {
     this.commit();
   }
 
+  /** A `render` step whose `id` matches an existing 'render' context item
+   * REPLACES it in place (position preserved) rather than appending a new
+   * one — how Act II's rule cards flip proposed→active and grow
+   * progressively, mirroring `emitNarrationDelta`'s same-id replace-in-place
+   * for narration. Different ids still append, exactly as before. */
   private handleRender(step: RenderStep): void {
     this.publish({ type: 'render', id: step.id, instruction: step.instruction });
-    this.contextItems.push({ kind: 'render', id: step.id, instruction: step.instruction });
+    const item: SentinelContextItem = { kind: 'render', id: step.id, instruction: step.instruction };
+    const index = this.contextItems.findIndex((existing) => existing.kind === 'render' && existing.id === step.id);
+    if (index === -1) this.contextItems.push(item);
+    else this.contextItems[index] = item;
     this.commit();
   }
 
@@ -448,6 +513,12 @@ export class ScenarioPlayer {
 
   private handleAuditWrite(step: AuditWriteStep): void {
     this.writeAudit(step.entry);
+  }
+
+  private handlePolicyPanel(step: PolicyPanelStep): void {
+    this.publish({ type: 'policyPanel', panel: step.panel });
+    this.policyPanel = step.panel;
+    this.commit();
   }
 
   private writeAudit(entry: Omit<EventLogEntry, 'id' | 'timestamp'>): void {
@@ -475,6 +546,7 @@ export class ScenarioPlayer {
     this.waitArmedAt = null;
     this.onWaitComplete = null;
     this.pendingApproval = null;
+    this.pendingStageAction = null;
 
     this.status = 'idle';
     this.act = 0;
@@ -489,6 +561,7 @@ export class ScenarioPlayer {
     this.auditEntries = [];
     this.messages = [];
     this.seq = 0;
+    this.policyPanel = 'closed';
   }
 
   /** Builds a fresh, frozen snapshot object from current internal state and
@@ -512,6 +585,10 @@ export class ScenarioPlayer {
       contextItems: this.contextItems.slice(),
       auditEntries: this.auditEntries.slice(),
       messages: this.messages.slice(),
+      policyPanel: this.policyPanel,
+      pendingStageAction: this.pendingStageAction
+        ? { id: this.pendingStageAction.id, action: this.pendingStageAction.action }
+        : null,
     });
   }
 }

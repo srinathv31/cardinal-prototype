@@ -370,3 +370,273 @@ describe('ScenarioPlayer — determinism', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });
+
+function policyPanelMessages(messages: SentinelStreamMessage[]) {
+  return messages.filter(
+    (m): m is Extract<SentinelStreamMessage, { type: 'policyPanel' }> => m.type === 'policyPanel',
+  );
+}
+
+describe('ScenarioPlayer — policyPanel', () => {
+  const policyPanelScenario: SentinelScenario = {
+    id: 'policy-panel-test',
+    steps: [
+      { type: 'actMarker', act: 2, title: 'Act II' },
+      { type: 'policyPanel', delayMs: 10, panel: 'drop' },
+      { type: 'policyPanel', delayMs: 10, panel: 'preview' },
+    ],
+  };
+
+  it('transitions closed -> drop -> preview per script, publishing matching messages', () => {
+    const player = new ScenarioPlayer(policyPanelScenario);
+    expect(player.getSnapshot().policyPanel).toBe('closed');
+
+    player.play();
+    vi.advanceTimersByTime(10);
+    expect(player.getSnapshot().policyPanel).toBe('drop');
+
+    vi.advanceTimersByTime(10);
+    expect(player.getSnapshot().policyPanel).toBe('preview');
+    expect(player.getSnapshot().status).toBe('done');
+
+    const panels = policyPanelMessages(player.getSnapshot().messages);
+    expect(panels.map((m) => m.panel)).toEqual(['drop', 'preview']);
+  });
+
+  it('reset returns policyPanel to closed', () => {
+    const player = new ScenarioPlayer(policyPanelScenario);
+    player.play();
+    vi.runAllTimers();
+    expect(player.getSnapshot().policyPanel).toBe('preview');
+
+    player.reset();
+    expect(player.getSnapshot().policyPanel).toBe('closed');
+  });
+});
+
+describe('ScenarioPlayer — awaitStageAction', () => {
+  const stageActionScenario: SentinelScenario = {
+    id: 'stage-action-test',
+    steps: [
+      { type: 'actMarker', act: 2, title: 'Act II' },
+      { type: 'counterUpdate', delayMs: 10, counter: { events: 1, violations: 0, flagged: 0 } },
+      { type: 'awaitStageAction', id: 'stage-action-1', action: 'policy-drop' },
+      { type: 'counterUpdate', delayMs: 10, counter: { events: 2, violations: 0, flagged: 0 } },
+    ],
+  };
+
+  it('hard-blocks with pendingStageAction set; timed steps after it do not run until resolved', () => {
+    const player = new ScenarioPlayer(stageActionScenario);
+    player.play();
+    vi.runAllTimers();
+
+    expect(player.getSnapshot().status).toBe('awaiting-stage-action');
+    expect(player.getSnapshot().pendingStageAction).toEqual({ id: 'stage-action-1', action: 'policy-drop' });
+    expect(player.getSnapshot().counter).toEqual({ events: 1, violations: 0, flagged: 0 });
+
+    const messagesAtGate = player.getSnapshot().messages;
+    expect(messagesAtGate.map((m) => m.type)).toEqual(['actMarker', 'counterUpdate', 'stageActionRequest']);
+
+    // Nothing past the gate emitted yet, even after a long wait.
+    vi.advanceTimersByTime(10_000);
+    expect(player.getSnapshot().status).toBe('awaiting-stage-action');
+    expect(player.getSnapshot().counter).toEqual({ events: 1, violations: 0, flagged: 0 });
+  });
+
+  it('resolveStageAction is a no-op unless that stage action is pending', () => {
+    const player = new ScenarioPlayer(stageActionScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const before = player.getSnapshot();
+    player.resolveStageAction('not-the-pending-one');
+    expect(player.getSnapshot()).toBe(before); // same snapshot identity — nothing changed
+  });
+
+  it('resolveStageAction with the correct id publishes stageActionResolved, resumes, and continues', () => {
+    const player = new ScenarioPlayer(stageActionScenario);
+    player.play();
+    vi.runAllTimers();
+
+    player.resolveStageAction('stage-action-1');
+    const afterResolve = player.getSnapshot().messages;
+    expect(afterResolve.at(-1)).toMatchObject({ type: 'stageActionResolved', id: 'stage-action-1' });
+    expect(player.getSnapshot().pendingStageAction).toBeNull();
+    expect(player.getSnapshot().status).toBe('playing');
+
+    vi.runAllTimers();
+    expect(player.getSnapshot().status).toBe('done');
+    expect(player.getSnapshot().counter).toEqual({ events: 2, violations: 0, flagged: 0 });
+  });
+
+  it('play() is a no-op while awaiting-stage-action', () => {
+    const player = new ScenarioPlayer(stageActionScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const before = player.getSnapshot();
+    player.play();
+    expect(player.getSnapshot()).toBe(before); // same snapshot identity — nothing changed
+  });
+});
+
+describe('ScenarioPlayer — jumpToAct auto-resolves awaitStageAction', () => {
+  const jumpStageActionScenario: SentinelScenario = {
+    id: 'jump-stage-action-test',
+    steps: [
+      { type: 'actMarker', act: 1, title: 'Act I' },
+      { type: 'awaitStageAction', id: 'stage-action-jump', action: 'policy-drop' },
+      { type: 'counterUpdate', delayMs: 10, counter: { events: 1, violations: 0, flagged: 0 } },
+      { type: 'actMarker', act: 2, title: 'Act II' },
+    ],
+  };
+
+  it('auto-resolves an awaitStageAction encountered mid-jump and lands correctly', () => {
+    const player = new ScenarioPlayer(jumpStageActionScenario);
+    player.jumpToAct(2);
+
+    const snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('paused');
+    expect(snapshot.act).toBe(1); // Act I's marker was consumed; Act II's is left unconsumed
+    expect(vi.getTimerCount()).toBe(0); // instant — no timers involved
+
+    const types = snapshot.messages.map((m) => m.type);
+    expect(types).toContain('stageActionRequest');
+    expect(types).toContain('stageActionResolved');
+    expect(snapshot.pendingStageAction).toBeNull();
+    expect(snapshot.counter).toEqual({ events: 1, violations: 0, flagged: 0 });
+  });
+});
+
+describe('ScenarioPlayer — same-id render replacement', () => {
+  const renderReplaceScenario: SentinelScenario = {
+    id: 'render-replace-test',
+    steps: [
+      { type: 'actMarker', act: 2, title: 'Act II' },
+      {
+        type: 'render',
+        delayMs: 10,
+        id: 'render-before',
+        instruction: {
+          component: 'MetricRow',
+          props: { metrics: [{ label: 'Before', value: '1', tone: 'neutral' }] },
+        },
+      },
+      {
+        type: 'render',
+        delayMs: 10,
+        id: 'render-rule-1',
+        instruction: {
+          component: 'RuleDiff',
+          props: {
+            title: 'BT-Servicing-Policy-2026 → extracted rules',
+            status: 'proposed',
+            rules: [
+              {
+                ruleId: 'R1',
+                title: 'No transfer within 60 days of a missed payment',
+                excerpt: { sectionHeading: 'New Transfer Eligibility', quote: 'quote text' },
+                plainEnglish: 'plain english',
+                machine: {
+                  ruleId: 'R1',
+                  datasetsTouched: ['payments', 'balance_transfers'],
+                  evaluationTrigger: 'balance_transfer.initiated',
+                },
+                validated: false,
+              },
+            ],
+          },
+        },
+      },
+      {
+        type: 'render',
+        delayMs: 10,
+        id: 'render-after',
+        instruction: {
+          component: 'MetricRow',
+          props: { metrics: [{ label: 'After', value: '1', tone: 'neutral' }] },
+        },
+      },
+      {
+        // Same id as the second step above — REPLACES it in place.
+        type: 'render',
+        delayMs: 10,
+        id: 'render-rule-1',
+        instruction: {
+          component: 'RuleDiff',
+          props: {
+            title: 'BT-Servicing-Policy-2026 → extracted rules',
+            status: 'active',
+            rules: [
+              {
+                ruleId: 'R1',
+                title: 'No transfer within 60 days of a missed payment',
+                excerpt: { sectionHeading: 'New Transfer Eligibility', quote: 'quote text' },
+                plainEnglish: 'plain english',
+                machine: {
+                  ruleId: 'R1',
+                  datasetsTouched: ['payments', 'balance_transfers'],
+                  evaluationTrigger: 'balance_transfer.initiated',
+                },
+                validated: true,
+              },
+            ],
+          },
+        },
+      },
+    ],
+  };
+
+  it('replaces the same-id item in place, sandwiched at its original position, not appended', () => {
+    const player = new ScenarioPlayer(renderReplaceScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const renderItems = player.getSnapshot().contextItems.filter((item) => item.kind === 'render');
+    expect(renderItems).toHaveLength(3); // render-before, render-rule-1 (replaced), render-after — not 4
+
+    expect(renderItems.map((item) => item.id)).toEqual(['render-before', 'render-rule-1', 'render-after']);
+
+    const ruleItem = renderItems[1];
+    if (ruleItem.kind !== 'render') throw new Error('expected a render item');
+    expect(ruleItem.instruction).toMatchObject({ component: 'RuleDiff', props: { status: 'active' } });
+  });
+
+  it('still publishes one render message per step, even though one replaces', () => {
+    const player = new ScenarioPlayer(renderReplaceScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const renderMessages = player.getSnapshot().messages.filter((m) => m.type === 'render');
+    expect(renderMessages).toHaveLength(4);
+  });
+
+  it('different ids still append', () => {
+    const player = new ScenarioPlayer(renderReplaceScenario);
+    player.play();
+    vi.runAllTimers();
+
+    const ids = player.getSnapshot().contextItems.map((item) => item.id);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicate ids landed
+  });
+});
+
+describe('ScenarioPlayer — armed node state', () => {
+  const armedScenario: SentinelScenario = {
+    id: 'armed-test',
+    steps: [
+      { type: 'actMarker', act: 2, title: 'Act II' },
+      { type: 'graphStep', delayMs: 10, nodeId: 'orchestrator', nodeState: 'armed' },
+    ],
+  };
+
+  it('an armed graphStep flows through to the snapshot', () => {
+    const player = new ScenarioPlayer(armedScenario);
+    player.play();
+    vi.runAllTimers();
+
+    expect(player.getSnapshot().graph.nodes.orchestrator).toBe('armed');
+    const graphMessages = player.getSnapshot().messages.filter((m) => m.type === 'graphStep');
+    expect(graphMessages.at(-1)).toMatchObject({ nodeState: 'armed' });
+  });
+});

@@ -82,6 +82,7 @@ const STATE_CAPTION: Record<SentinelNodeState, string> = {
   idle: "idle",
   working: "working",
   done: "done",
+  armed: "armed",
 };
 
 /** Always-rendered edge catalog (brief §4) — dim by default, lit when its
@@ -123,12 +124,23 @@ function SentinelAgentNode({ data }: NodeProps<SentinelAgentNodeType>) {
           aria-hidden="true"
         />
       ) : null}
+      {state === "armed" ? (
+        // Act II's post-activation "idle-armed" state (brief §3 beat 4):
+        // clearly alive, clearly not busy — the same glow treatment as
+        // `working` but dimmer and on a slower cadence, so it reads as a
+        // resting pulse rather than active processing.
+        <div
+          className="absolute -inset-1 -z-10 animate-pulse rounded-xl bg-primary/10 blur-md [animation-duration:3s]"
+          aria-hidden="true"
+        />
+      ) : null}
       <div
         className={cn(
           "flex items-center gap-3 rounded-xl border px-3.5 py-3 transition-all duration-300",
           state === "idle" && "border-border bg-card text-muted-foreground opacity-55",
           state === "working" && "border-primary bg-card text-foreground opacity-100",
           state === "done" && "border-primary/60 bg-primary/10 text-foreground opacity-100",
+          state === "armed" && "border-primary/40 bg-card text-foreground opacity-80",
         )}
       >
         <Handle type="target" position={Position.Top} className="opacity-0 pointer-events-none" />

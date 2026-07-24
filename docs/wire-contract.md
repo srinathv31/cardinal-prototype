@@ -350,12 +350,14 @@ an ordered, checked-in list of `ScenarioStep`s. Every variant except
 |---|---|---|
 | `actMarker` | `act: 1\|2\|3`, `title` | No `delayMs`. Playback PAUSES on reaching one — act transitions are presenter-triggered, never automatic (brief §4). |
 | `emitEvent` | `delayMs`, `event: StreamEvent`, `highlight?`, `complianceBadge?` | Feeds the replay rail. `highlight` is Act III's catch; `complianceBadge` is a compliance-pass beat (e.g. Elena's R3 check). |
-| `graphStep` | `delayMs`, `nodeId: SentinelNodeId`, `nodeState: 'idle'\|'working'\|'done'`, `animatedEdges?` | One node's state transition on the live agent graph. `animatedEdges`, when present, REPLACES the animated-edge set wholesale — declarative, not a diff, because the graph renderer holds no logic. |
+| `graphStep` | `delayMs`, `nodeId: SentinelNodeId`, `nodeState: 'idle'\|'working'\|'done'\|'armed'`, `animatedEdges?` | One node's state transition on the live agent graph. `armed` is Act II's post-activation "idle-armed" state (brief §3 beat 4) — rules live, nothing in flight, a subtle pulse instead of fully dark. `animatedEdges`, when present, REPLACES the animated-edge set wholesale — declarative, not a diff, because the graph renderer holds no logic. |
 | `narration` | `delayMs`, `id`, `text` | Played back chunked (§9.2), typing-effect style. |
-| `render` | `delayMs`, `id`, `instruction: RenderInstruction` | Same `{ component, props }` shape §3 documents — registry components only. |
+| `render` | `delayMs`, `id`, `instruction: SentinelRenderInstruction` | Same `{ component, props }` shape §3 documents, widened to the Sentinel-only additive components of §9.6 — registry components only. A step reusing an earlier step's `id` REPLACES that rendered item in place (position preserved) instead of appending a second one — progressive/stateful evidence, e.g. Act II's rule cards flipping proposed→active as the same `id` re-renders with `status: 'active'`. |
 | `awaitApproval` | `id`, `payload: ApprovalCardProps`, `audit` | HARD-BLOCKS playback until resolved — no auto-approve, no timeout (v1 §4 carries over verbatim). No `delayMs`: the block itself is the wait. `audit` is `Omit<EventLogEntry, 'id'\|'timestamp'\|'kind'\|'actor'>` — the fields `kind`/`actor` get filled in from the resolution (§9.2). |
 | `counterUpdate` | `delayMs`, `counter: { events, violations, flagged }`, `caption?` | The replay-rail counter (brief §3's "14 events · 1 violation · 0 flagged" beats). |
 | `auditWrite` | `delayMs`, `entry: Omit<EventLogEntry, 'id'\|'timestamp'>` | Appends straight to the shared Event Log via §9.4 — `id`/`timestamp` are assigned on append, exactly like every other entry in §5. |
+| `policyPanel` | `delayMs`, `panel: 'closed'\|'drop'\|'preview'` | Drives the Act II policy drawer declaratively (brief §3 beat 1) — the drawer is a pure renderer of this field, no component-local open/closed state. |
+| `awaitStageAction` | `id`, `action: 'policy-drop'` | HARD-BLOCKS playback until resolved, exactly like `awaitApproval` (no `delayMs`, no auto-approve, no timeout) — but models a presenter-driven staging beat that isn't a business decision, e.g. Act II's mock file-drop into the policy panel: a real human gate all the same. |
 
 `SentinelNodeId` is the six fixed graph nodes: `orchestrator`,
 `policy-analyst`, `rule-engineer`, `data-collector`, `critic`,
@@ -365,7 +367,7 @@ removed at runtime).
 ### 9.2 Published message union
 
 `SentinelStreamMessage` mirrors `ScenarioStep` one-for-one, minus `delayMs`
-(consumed by the time a message publishes) and minus the two variants that
+(consumed by the time a message publishes) and minus the three variants that
 split into a different shape:
 
 - `narration` → one or more `narrationDelta` messages: `{ type:
@@ -380,6 +382,13 @@ split into a different shape:
   immediately followed by an `auditWrite` message built from the step's
   `audit` field plus `kind: approved ? 'approval.granted' : 'approval.denied'`
   and `actor: 'human'` (§5's human-decision convention, unchanged).
+- `awaitStageAction` → a `stageActionRequest` message when the gate opens
+  (`{ type: 'stageActionRequest', id, action }`), and — once resolved via
+  `ScenarioPlayer#resolveStageAction` — a `stageActionResolved` message (`{
+  type: 'stageActionResolved', id }`). Same hard-block semantics as
+  `awaitApproval` (no timer, no auto-resolve outside `jumpToAct`'s
+  rehearsal fast-forward, which auto-resolves it exactly as it
+  auto-approves a pending `awaitApproval`).
 
 Every other step publishes one message of the same `type`, carrying the
 same fields minus `delayMs`:
@@ -397,12 +406,12 @@ type SentinelStreamMessage =
   | {
       type: 'graphStep';
       nodeId: SentinelNodeId;
-      nodeState: 'idle' | 'working' | 'done';
+      nodeState: 'idle' | 'working' | 'done' | 'armed';
       animatedEdges?: Array<{ from: SentinelNodeId; to: SentinelNodeId }>;
       seq: number;
     }
   | { type: 'narrationDelta'; id: string; delta: string; done: boolean; seq: number }
-  | { type: 'render'; id: string; instruction: RenderInstruction; seq: number }
+  | { type: 'render'; id: string; instruction: SentinelRenderInstruction; seq: number }
   | { type: 'approvalRequest'; id: string; payload: ApprovalCardProps; seq: number }
   | { type: 'approvalResolved'; id: string; approved: boolean; seq: number }
   | {
@@ -411,7 +420,10 @@ type SentinelStreamMessage =
       caption?: string;
       seq: number;
     }
-  | { type: 'auditWrite'; entry: Omit<EventLogEntry, 'id' | 'timestamp'>; seq: number };
+  | { type: 'auditWrite'; entry: Omit<EventLogEntry, 'id' | 'timestamp'>; seq: number }
+  | { type: 'policyPanel'; panel: 'closed' | 'drop' | 'preview'; seq: number }
+  | { type: 'stageActionRequest'; id: string; action: 'policy-drop'; seq: number }
+  | { type: 'stageActionResolved'; id: string; seq: number };
 ```
 
 Every message carries a monotonically increasing `seq` — the ordering
@@ -454,6 +466,46 @@ everything (brief §3 Act III's closing beat).
    semantics (`lib/sentinel/scenario/player.ts`), which exist for presenter
    rehearsal only and are never reachable from the presenter bar's normal
    play/pause/reset controls.
-3. Only registry components render from `render` steps, ever (§3 unchanged).
+3. Only registry components render from `render` steps, ever — either §3's
+   v1 registry or the Sentinel stage components of §9.6, never anything else.
 4. Every Sentinel audit write is reconstructable from `GET /api/events`
    (§1), same as every v1 entry.
+
+### 9.6 Sentinel stage components (additive)
+
+The Sentinel stage widens the `render` step's payload from `RenderInstruction`
+(§3) to `SentinelRenderInstruction` (`lib/sentinel/registry.ts`) — a union of
+the unchanged v1 registry and Sentinel-only additive components:
+
+```ts
+type SentinelRenderInstruction = RenderInstruction | { component: 'RuleDiff'; props: RuleDiffProps };
+```
+
+`lib/sentinel/registry.ts` is a separate, additive component namespace, not a
+change to `lib/registry/schemas.ts` — v1's registry (§3, §5c) is untouched;
+`docs/v2-reuse-map.md` §4 is the complete list of additive touches to
+existing files, and this file is deliberately not on it.
+
+**`RuleDiff`** (Act II, brief §3 beat 3) — the split excerpt/plain-English/
+machine-footer card the Rule Diff view renders while the policy document is
+parsed into enforceable rules:
+
+| Field | Type | Notes |
+|---|---|---|
+| `title` | `string` | e.g. "BT-Servicing-Policy-2026 → extracted rules". |
+| `status` | `'proposed' \| 'active'` | `proposed` before the ApprovalCard resolves, `active` once approved. Set by the scenario step, never inferred client-side. |
+| `rules[].ruleId` | `string` | e.g. "R1". |
+| `rules[].title` | `string` | |
+| `rules[].excerpt.sectionHeading` | `string` | e.g. "New Transfer Eligibility". |
+| `rules[].excerpt.quote` | `string` | Verbatim substring of the policy document — cited, not paraphrased. |
+| `rules[].plainEnglish` | `string` | Model-authored restatement (editorial content, §5a). |
+| `rules[].machine.ruleId` | `string` | Machine-readable footer. |
+| `rules[].machine.datasetsTouched` | `string[]` | |
+| `rules[].machine.evaluationTrigger` | `string` | |
+| `rules[].criticNote?` | `string` | Optional — the critic's evaluability note, e.g. "Evaluable with current SOE data: payments + balance-transfer events." |
+| `rules[].validated` | `boolean` | Critic-pass flag, set by the scenario step, never derived client-side. |
+
+`rules` holds 1–3 entries (brief §5: the three extracted rules R1–R3).
+
+P4 (Act III) adds its own evidence cards here — a BT event detail card and a
+rule citation card — following the same additive pattern.

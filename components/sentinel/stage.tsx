@@ -18,18 +18,51 @@
 // bottom = 3rem = var(--spacing)*12, --spacing: 0.25rem per Tailwind's
 // default theme) around every route, so the stage fills exactly the
 // remaining viewport height rather than the more common `h-screen`.
+//
+// P3 closes the audit seam player.ts's header comment has documented since
+// P0 ("the stage subscribes to the player's `auditWrite` messages and POSTs
+// each one here itself"): the player is constructed with an `onMessage`
+// callback that POSTs every `auditWrite` message's `entry` to
+// `/api/sentinel/audit`, fire-and-forget. A failed or offline write must
+// never affect playback (brief §8: the demo runs with the network cable
+// pulled) — `.catch(() => {})` swallows the rejection instead of
+// propagating it anywhere the player or a renderer would see. Rehearsal
+// jumps (`jumpToAct`) re-post every `auditWrite` they fast-forward through
+// same as normal playback; each replay is simply its own run in the shared
+// Event Log, which is fine.
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { ScenarioPlayer } from "@/lib/sentinel/scenario/player";
 import type { SentinelScenario, SentinelStageState } from "@/lib/sentinel/scenario/types";
+import type { PolicyDocument } from "@/lib/sentinel/policy";
 import { AuditStrip } from "./audit-strip";
 import { ContextRail } from "./context-rail";
 import { EventReplayRail } from "./event-replay-rail";
 import { LiveAgentGraph } from "./live-agent-graph";
+import { PolicyPanel } from "./policy-panel";
 import { PresenterBar } from "./presenter-bar";
 
-export function Stage({ scenario }: { scenario: SentinelScenario }) {
-  const player = useMemo(() => new ScenarioPlayer(scenario), [scenario]);
+export function Stage({
+  scenario,
+  policyDocument,
+}: {
+  scenario: SentinelScenario;
+  policyDocument: PolicyDocument;
+}) {
+  const player = useMemo(
+    () =>
+      new ScenarioPlayer(scenario, {
+        onMessage: (message) => {
+          if (message.type !== "auditWrite") return;
+          fetch("/api/sentinel/audit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(message.entry),
+          }).catch(() => {});
+        },
+      }),
+    [scenario],
+  );
 
   // Clears any pending timer on unmount (and on scenario swap, since the
   // memo above tears down the old player) — a stray setTimeout must never
@@ -45,6 +78,14 @@ export function Stage({ scenario }: { scenario: SentinelScenario }) {
   const onReset = useCallback(() => player.reset(), [player]);
   const onJumpToAct = useCallback((act: 1 | 2 | 3) => player.jumpToAct(act), [player]);
   const onSetSpeed = useCallback((speed: 1 | 2) => player.setSpeed(speed), [player]);
+  const onResolveApproval = useCallback(
+    (id: string, approved: boolean) => player.resolveApproval(id, approved),
+    [player],
+  );
+  const onPolicyDrop = useCallback(() => {
+    const pending = player.getSnapshot().pendingStageAction;
+    if (pending) player.resolveStageAction(pending.id);
+  }, [player]);
 
   return (
     <div className="flex h-[calc(100vh-var(--spacing)*12)] min-h-0 flex-col gap-4">
@@ -61,7 +102,15 @@ export function Stage({ scenario }: { scenario: SentinelScenario }) {
           headline={state.headline}
           approvalPending={state.status === "awaiting-approval"}
         />
-        <ContextRail items={state.contextItems} />
+        <div className="relative grid min-h-0 overflow-hidden">
+          <ContextRail items={state.contextItems} onResolveApproval={onResolveApproval} />
+          <PolicyPanel
+            panel={state.policyPanel}
+            dropEnabled={state.pendingStageAction?.action === "policy-drop"}
+            onDrop={onPolicyDrop}
+            document={policyDocument}
+          />
+        </div>
       </div>
       <AuditStrip entries={state.auditEntries} />
       <PresenterBar
@@ -91,6 +140,8 @@ function statusLabel(status: SentinelStageState["status"], act: SentinelStageSta
       return act === 0 ? "Paused" : `Act ${act} · Paused`;
     case "awaiting-approval":
       return "Awaiting approval";
+    case "awaiting-stage-action":
+      return "Awaiting presenter";
     case "done":
       return "Complete";
   }
