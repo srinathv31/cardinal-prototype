@@ -26,6 +26,18 @@
 // Sentinel stream (types.ts) carries this wider type instead of the plain
 // v1 one, so `render` steps can target either registry without a second
 // step type.
+//
+// Branch `demo-aug4` (DEMO_BUILD_PLAN.md "UI components") adds the two chat
+// evidence components the ops-chat demo renders: `ViolationsDashboard` — the
+// batch-evaluation result (stat tiles, per-rule bar breakdown, and the
+// click-to-expand account table) — and `ReportCard`, the audit-report download
+// affordance that follows the batch-removal approval. They land HERE, in the
+// additive Sentinel namespace, for the same reason everything else in this file
+// did: v1's registry (lib/registry/schemas.ts) stays untouched. Note that these
+// two are the first members of this registry whose payload is produced by a
+// live server evaluator rather than a scripted scenario step — the schemas are
+// identical in kind either way, since both sources are required to hand the
+// renderer preformatted display strings and nothing else.
 
 import { z } from 'zod';
 import { renderInstructionSchema, type RenderInstruction } from '@/lib/registry/schemas';
@@ -293,6 +305,121 @@ export const remediationReportPropsSchema = z.object({
 });
 export type RemediationReportProps = z.infer<typeof remediationReportPropsSchema>;
 
+/** The two policies the ops chat evaluates in batch (DEMO_BUILD_PLAN.md's
+ * `PolicyId`). Declared here rather than imported from `lib/rules/**` on
+ * purpose: this registry is imported by `"use client"` renderers, and the rule
+ * store is a server module. Wave 2 unifies the two declarations; until then
+ * this is the union the renderer validates against, and it is deliberately a
+ * closed enum so `POLICY_LABEL` in violations-dashboard.tsx is exhaustive by
+ * construction rather than by a runtime fallback. */
+export const violationsPolicyIdSchema = z.enum(['authorized-user', 'card-activation']);
+export type ViolationsPolicyId = z.infer<typeof violationsPolicyIdSchema>;
+
+/** `ViolationsDashboard` (DEMO_THESIS.md use case 1 beats 4–5 / use case 3 ops
+ * side; DEMO_BUILD_PLAN.md "UI components" + its `ViolationsPayload` contract)
+ * — the batch-evaluation result rendered as chat evidence, and the demo's
+ * centerpiece. One shape serves BOTH policies: the AU sweep and the
+ * card-activation sweep differ only in which rule ids come back, which is why
+ * `byRule[].ruleId` and `rows[].ruleId` are free strings here rather than the
+ * `'R1' | 'R2' | 'R3'` enum `auExceptionRowSchema` above pins — card-activation
+ * rules are `CA-R1`/`CA-R2`, and a second near-identical schema for two extra
+ * ids would be a schema fork for no validation gained.
+ *
+ * `summary`'s three figures are NUMBERS, not preformatted strings — the only
+ * place in this registry where a raw number reaches a renderer. That is the
+ * plan's contract, not an oversight, and it is safe because the renderer prints
+ * them verbatim: no `toLocaleString`, no separators, no arithmetic (invariant
+ * 5b). `byRule[].count` is likewise raw, and the dashboard's bar widths are
+ * computed from those counts purely as layout geometry — the same latitude
+ * `bar-breakdown.tsx` already takes ("the only computation here is bar-width
+ * geometry... never business arithmetic").
+ *
+ * `rows[].detail` carries EVERYTHING the drill-down needs, preformatted
+ * server-side. The click-into interaction is therefore pure client state: no
+ * second fetch, no model involvement, nothing to go wrong on stage with the
+ * network cable pulled (invariant 5a). A row without detail pairs would render
+ * an empty drawer, so the array has a `.min(1)` floor. */
+export const violationsDashboardPropsSchema = z.object({
+  policyId: violationsPolicyIdSchema,
+  summary: z.object({
+    /** Population the evaluator swept — AU relationships for
+     * `authorized-user`, issued cards for `card-activation`. The label the
+     * renderer shows is deliberately just "Scanned": the unit differs per
+     * policy, and the payload does not name it. */
+    scanned: z.number().int().nonnegative(),
+    accountsAffected: z.number().int().nonnegative(),
+    exceptions: z.number().int().nonnegative(),
+  }),
+  /** One entry per rule that produced at least one exception, in the order the
+   * evaluator reports them — the renderer maps by array order and never sorts,
+   * so the bars read in rule order (R1, R2, R3), not by magnitude. */
+  byRule: z
+    .array(
+      z.object({
+        /** e.g. "R1" or "CA-R2". */
+        ruleId: z.string(),
+        /** The rule's own title, e.g. "Product eligibility — no authorized
+         * users on secured cards". */
+        title: z.string(),
+        count: z.number().int().nonnegative(),
+      }),
+    )
+    .min(1)
+    .max(8),
+  rows: z
+    .array(
+      z.object({
+        /** e.g. "au-acct-0043" — rendered in monospace as the row's identity. */
+        accountId: z.string(),
+        /** The primary cardholder's name. */
+        holder: z.string(),
+        ruleId: z.string(),
+        ruleTitle: z.string(),
+        /** A COMPLETE sentence from the evaluator — never model-authored
+         * (invariant 5a). Truncated in the collapsed row, shown in full in the
+         * drill-down panel. */
+        finding: z.string(),
+        /** Drill-down facts, every value a preformatted display string
+         * ("$1,250.00", "Mar 4, 2026") — see the field-group comment above. */
+        detail: z
+          .array(z.object({ label: z.string(), value: z.string() }))
+          .min(1)
+          .max(8),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+export type ViolationsDashboardProps = z.infer<typeof violationsDashboardPropsSchema>;
+
+/** `ReportCard` (DEMO_THESIS.md use case 1 beat 8) — the audit-report download
+ * affordance the agent renders after the batch removal executes. Deliberately
+ * thinner than `RemediationReport` above: that card is the OUTCOME receipt
+ * (counters, confirmation id, result rows), this one is the ARTIFACT the
+ * outcome produced. Keeping them separate means the report card can be
+ * re-rendered on its own — "here's the file again" — without restating a
+ * receipt the audience already read.
+ *
+ * The component is a plain `<a href download>`, never a client fetch: `href` is
+ * inert markup until the user clicks it, so a missing route degrades to a
+ * failed navigation rather than a thrown render. Unlike
+ * `RemediationReport.downloadUrl` this field is REQUIRED — a report card with
+ * nothing to download has no reason to exist, whereas the remediation receipt
+ * still carries its counters when the download is unavailable. */
+export const reportCardPropsSchema = z.object({
+  /** e.g. "authorized-user-policy-audit-2026-08-04.html" — also the `download`
+   * attribute's suggested filename. */
+  filename: z.string(),
+  /** Preformatted timestamp, e.g. "Aug 4, 2026 at 9:42 AM ET". Never an ISO
+   * string: this renderer does no date formatting (invariant 5b). */
+  generatedAt: z.string(),
+  /** One sentence describing what the file contains. */
+  summary: z.string(),
+  /** e.g. "/api/report?policy=authorized-user". */
+  href: z.string(),
+});
+export type ReportCardProps = z.infer<typeof reportCardPropsSchema>;
+
 /** `RenderInstruction` (v1, `lib/registry/schemas.ts`) widened with the
  * Sentinel-only components. Every `render` step on the Sentinel stream
  * carries this type instead of the plain v1 one (types.ts). */
@@ -309,6 +436,14 @@ export const sentinelRenderInstructionSchema = z.union([
     component: z.literal('RemediationReport'),
     props: remediationReportPropsSchema,
   }),
+  z.object({
+    component: z.literal('ViolationsDashboard'),
+    props: violationsDashboardPropsSchema,
+  }),
+  z.object({
+    component: z.literal('ReportCard'),
+    props: reportCardPropsSchema,
+  }),
 ]);
 export type SentinelRenderInstruction =
   | RenderInstruction
@@ -316,4 +451,6 @@ export type SentinelRenderInstruction =
   | { component: 'RuleCitation'; props: RuleCitationProps }
   | { component: 'DecisionCard'; props: DecisionCardProps }
   | { component: 'PolicyExceptionTable'; props: PolicyExceptionTableProps }
-  | { component: 'RemediationReport'; props: RemediationReportProps };
+  | { component: 'RemediationReport'; props: RemediationReportProps }
+  | { component: 'ViolationsDashboard'; props: ViolationsDashboardProps }
+  | { component: 'ReportCard'; props: ReportCardProps };

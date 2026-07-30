@@ -4,8 +4,13 @@
 // delegate unchanged (unknown names still fall through to its
 // console-error-never-throw path, demo-safety brief §9); Sentinel-only
 // components (wire-contract §9.6) route here: `RuleDiff`, `RuleCitation`,
-// `DecisionCard`, and P3's `PolicyExceptionTable` / `RemediationReport`. v3
-// removed `BTEventDetail` (docs/v3-migration-map.md
+// `DecisionCard`, P3's `PolicyExceptionTable` / `RemediationReport`, and
+// branch `demo-aug4`'s ops-chat pair `ViolationsDashboard` / `ReportCard`
+// (DEMO_BUILD_PLAN.md "UI components"). Every member of
+// `SentinelRenderInstruction` must have a branch here — the fall-through hands
+// `instruction` to v1's `EvidenceRenderer`, which only accepts the v1
+// `RenderInstruction`, so an unrouted Sentinel component is a type error rather
+// than a silent blank. v3 removed `BTEventDetail` (docs/v3-migration-map.md
 // §2b) — there is no single-event hero card when the investigation is an
 // aggregate sweep over the whole book, so its import and routing branch are
 // gone along with it.
@@ -23,8 +28,10 @@ import type { SentinelRenderInstruction } from "@/lib/sentinel/registry";
 import { DecisionCard } from "./decision-card";
 import { PolicyExceptionTable } from "./policy-exception-table";
 import { RemediationReport } from "./remediation-report";
+import { ReportCard } from "./report-card";
 import { RuleCitation } from "./rule-citation";
 import { RuleDiff } from "./rule-diff";
+import { ViolationsDashboard } from "./violations-dashboard";
 
 export function SentinelEvidenceRenderer({
   instruction,
@@ -40,6 +47,10 @@ export function SentinelEvidenceRenderer({
     return <PolicyExceptionTable {...instruction.props} />;
   if (instruction.component === "RemediationReport")
     return <RemediationReport {...instruction.props} />;
+  if (instruction.component === "ViolationsDashboard")
+    return <ViolationsDashboard {...instruction.props} />;
+  if (instruction.component === "ReportCard")
+    return <ReportCard {...instruction.props} />;
   if (instruction.component === "OutreachDraftCard")
     return <OutreachDraftCard {...instruction.props} />;
   return <EvidenceRenderer instruction={instruction} />;
