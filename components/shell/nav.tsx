@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Headset,
   LayoutDashboard,
   MessageSquare,
   ScrollText,
@@ -18,6 +19,7 @@ const links = [
   { href: "/workflows", label: "Workflow Canvas", icon: Workflow },
   { href: "/runs", label: "Agent Runs", icon: Activity },
   { href: "/ask", label: "Ask", icon: MessageSquare },
+  { href: "/servicing", label: "Servicing", icon: Headset },
   { href: "/sentinel", label: "Sentinel", icon: Shield },
   { href: "/events", label: "Event Log", icon: ScrollText },
 ];

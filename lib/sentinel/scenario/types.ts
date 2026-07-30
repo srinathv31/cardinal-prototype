@@ -30,6 +30,15 @@
 // `counterUpdate.counter` is reshaped for an aggregate sweep. `StreamEvent`
 // is no longer imported here at all.
 //
+// P3b addition (brief §3: "reject path must work on demand"):
+// `AwaitApprovalStep.onDeny` is a new, additive, OPTIONAL field — a denial
+// with no `onDeny` continues the script unchanged, exactly as v2 always did.
+// When present, `ScenarioPlayer#resolveApproval` replaces the remainder of
+// the step queue with `onDeny`'s steps instead of playing on into content
+// that assumed approval (player.ts's `resolveApproval` doc comment has the
+// mechanics). See `AwaitApprovalStep`'s own doc comment below for why this
+// is safe across `reset()`.
+//
 // `SentinelStageState` is the derived, renderer-friendly snapshot the player
 // exposes via `getSnapshot()` — stage components stay pure renderers of this
 // shape (v1 invariant 5b), never of the raw message log.
@@ -142,12 +151,31 @@ export interface RenderStep {
  * no auto-approve, no timeout (v1 brief §5d carries over). No `delayMs`:
  * the block itself is the wait. `audit` is the human-decision Event Log
  * entry to write on resolution, minus the fields the resolution derives
- * (`kind` from the approve/deny outcome, `actor: 'human'` always). */
+ * (`kind` from the approve/deny outcome, `actor: 'human'` always).
+ *
+ * `onDeny` (P3b, brief §3: "reject path must work on demand") — steps to
+ * play INSTEAD of the remainder of the scenario when this gate is DENIED.
+ * Absent → denial continues the script unchanged (v2 semantics, correct for
+ * a gate whose rejection isn't terminal, e.g. Act II's rule-activation
+ * gate). Present → Act III's remediation gate supplies a short closing
+ * branch (an agent line, an audit entry, a zeroed counter) instead of
+ * letting playback sail into steps — the RemediationReport chief among them
+ * — that assume the removals actually executed. This is deliberately an
+ * array of ordinary `ScenarioStep`s, not a new mini-DSL: a deny branch is
+ * just more script, played the normal way.
+ *
+ * `reset()` is unaffected by a prior denial taking this branch: the player
+ * re-copies its working step queue from the scenario's own (never-mutated)
+ * `steps` array on every `reset()`/construction (player.ts's
+ * `initializeState`), so a deny → reset → replay cycle is byte-identical to
+ * a clean run — the demo-safety property brief §9 cares about, not merely
+ * an implementation nicety. */
 export interface AwaitApprovalStep {
   type: 'awaitApproval';
   id: string;
   payload: ApprovalCardProps;
   audit: Omit<EventLogEntry, 'id' | 'timestamp' | 'kind' | 'actor'>;
+  onDeny?: ScenarioStep[];
 }
 
 /** The Act II policy drawer's three states (brief §3 Act II beat 1: closed →

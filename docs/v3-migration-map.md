@@ -77,8 +77,21 @@ an archaeological record.
 | **Reshaped** snapshot | `railEvents` → `conversation: Array<{ id, role, text, done }>`; `SentinelContextItem` drops its `'narration'` kind (narration now lives in the conversation rail, evidence in the context rail — brief §4). |
 
 Unchanged: `actMarker`, `graphStep`, `render` (including same-id
-replace-in-place), `awaitApproval`, `auditWrite`, `policyPanel`, and every
-ordering and blocking guarantee.
+replace-in-place), `auditWrite`, `policyPanel`, and every ordering and
+blocking guarantee. `awaitApproval`'s baseline shape (`id`, `payload`,
+`audit`) and its hard-block semantics are unchanged too, but see the next
+two rows — it did not leave P3 as pristine as this table originally
+predicted.
+
+Two more changes landed after this table was first written, both post-P0
+(P3/P3b) and both now documented in `docs/wire-contract.md` §9.1/§9.6 —
+recorded here because this table's job is the full v2→v3 diff, not just
+P0's slice of it:
+
+| Change | Shape |
+|---|---|
+| **Added** (P3b, "reject path must work on demand") `AwaitApprovalStep.onDeny?` | `ScenarioStep[] \| undefined`. Steps played **instead of** the remainder of the scenario when the gate is DENIED; absent means denial continues the script unchanged (v2's only behavior, still the default). `ScenarioPlayer#resolveApproval` splices `onDeny`'s steps into the player's *working* step queue, never `scenario.steps` itself, so `reset()` always restores the pristine script even after a prior denial took the branch. Act III's remediation gate is the one scripted use: a decline there gets a short closing branch (an agent line, an audit entry, a zeroed counter) instead of playing into content that assumes the removal executed. |
+| **Added** (P3, W3.4) `RuleDiffProps.storeMeta?` | `string`. The rule store's own label, e.g. "Rule store · continuous · nightly 02:00 UTC · last run 4h ago" — set only once the rules are active (absent in Act II, present when Act III re-renders the same card under the same `render` id). A label, not a mechanism (brief §6d: "do not build a scheduler") — nothing in this build schedules anything. |
 
 ## 5. Rewritten — policy content (§2c, §5a/§5b)
 
@@ -156,14 +169,18 @@ excluded from it: not secured (R1 clear); a transactor with no missed payment
 anywhere in its ledger (R2 clear); Priya added as an adult and Dev added at ~18
 (R3 clear).
 
-## 7. Deferred out of P0 (recorded so nothing is silently dropped)
+## 7. Deferred out of P0 — what shipped, and when (reconciled)
 
-| Item | Phase | Note |
+Written during P0 as a forward-looking plan; every row below is now closed
+except the last one. Recorded in the past tense so this table reads as a
+record of what happened, not a restatement of `docs/wire-contract.md`.
+
+| Item | P0 deferred it to | What shipped |
 |---|---|---|
-| `PolicyExceptionTable`, `RemediationReport` schemas + renderers | P3 (W3.1/W3.2) | §5c's two new registry components. P0 only performs the `BTEventDetail` removal half of §5c. |
-| `approvalCardPropsSchema` scope/count widening | P3 (W3.3) | |
-| `POST /api/sentinel/remediate`, `GET /api/sentinel/report` | P3 (W3.2) | §6c's bulk-side-effect seam. |
-| Conversation-rail prompt input, `'prompt'` gating UI, suggestion chip, verbatim echo *in the UI* | P1 (W1.1) | P0 ships the read-only transcript half and the **contract** for all of it (`awaitStageAction: 'prompt'`, `resolveStageAction(id, text)`) so the engine seam is proven before the UI lands. |
-| Three-panel stage re-layout, Manual Audit card, Act I counter | P1 (W1.2/W1.3) | P0 leaves `/sentinel` playable on the existing graph-rehearsal fixture; `buildDemoScenario` returns in P1. |
-| `scripts/demo-replay.mjs` v3 coverage | P5 (W5.4) | The verifier asserts v1 beats 0–6 only and never referenced a Sentinel BT beat, so the teardown does not touch it. |
-| Everything under `/servicing` | P4 | Disjoint file set. |
+| `PolicyExceptionTable`, `RemediationReport` schemas + renderers | P3 (W3.1/W3.2) | Landed as planned. `lib/sentinel/registry.ts`'s `policyExceptionTablePropsSchema` / `remediationReportPropsSchema`; `components/sentinel/evidence/policy-exception-table.tsx` / `remediation-report.tsx`. Both fed by the single checked-in `lib/sentinel/exception-fixture.ts` derivation, same fixture the two new API routes below read from — table, report card, and CSV can never drift against each other. Documented in `docs/wire-contract.md` §9.6. |
+| `approvalCardPropsSchema` scope/count widening | P3 (W3.3) | Landed, but as two independently-optional fields rather than one "scope/count" field: `scope` (a preformatted blast-radius summary plus optional `counts` chips) and `reviewList` (a separate "Review the list (N)" disclosure, capped at 25 rows). `lib/registry/schemas.ts`. Documented in `docs/wire-contract.md` §4. |
+| `POST /api/sentinel/remediate`, `GET /api/sentinel/report` | P3 (W3.2) | Landed. `app/api/sentinel/remediate/route.ts`, `app/api/sentinel/report/route.ts` — both mirror `/api/sentinel/audit`'s stage-calls-not-player seam exactly. Documented as the "bulk side-effect seam" in `docs/wire-contract.md` §9.7 (brief §11's first named handoff seam). |
+| Conversation-rail prompt input, `'prompt'` gating UI, suggestion chip, verbatim echo *in the UI* | P1 (W1.1) | Landed. `components/sentinel/conversation-rail.tsx`'s `PromptInput` — enabled only while `awaitStageAction: 'prompt'` is pending, offers `suggested` as a one-click chip, calls `onSubmitPrompt` verbatim on submit. The engine-side contract P0 shipped ahead of this (`resolveStageAction(id, text)`) needed no changes to support it. |
+| Three-panel stage re-layout, Manual Audit card, Act I counter | P1 (W1.2/W1.3) | Landed. `components/sentinel/stage.tsx`'s three-column grid; `context-rail.tsx`'s static `ManualAuditCard`; `demo-scenario.ts`'s `actOneSteps()`. `buildDemoScenario()` now assembles and returns the real three-act script (`actOneSteps` + `actTwoSteps` + `await actThreeSteps()`); `/sentinel` no longer falls back to the P0-era graph-rehearsal fixture by default. |
+| Everything under `/servicing` | P4 | Landed. `lib/agents/servicing/**` (agent, identity, resolvers, tools, script), `app/servicing/`, `components/servicing/`. Documented as the "customer-scoped identity binding" seam in `docs/wire-contract.md` §10 (brief §11's second named handoff seam). |
+| `scripts/demo-replay.mjs` v3 coverage | P5 (W5.4) | **Closed.** Confirmed first that the verifier never asserted a Sentinel-stage balance-transfer beat: the pre-W5.4 file had zero references to "Sentinel" or "servicing" anywhere (case-insensitive grep), and its only BT-flavored content — the `bt-lifecycle` monitor-agent beat and the "balance transfers expiring" Ask question — is v1's `BT Lifecycle` agent (brief §3's Workflow Canvas cast), unrelated to the removed v2 Sentinel BT stage (no promo-notice rail, no `balance_transfer.initiated`, no replay log). So §2b's teardown left nothing stale to remove here. Extended with 8 new beats (7–14, `docs/wire-contract.md` §8) covering everything about `/sentinel` and `/servicing` that crosses the network: the real scenario serving (vs. the error boundary or the `?scenario=graph-rehearsal` fixture), `POST /api/sentinel/remediate`'s byte-identical determinism and its real 87/74/74 figures, `GET /api/sentinel/report`'s full 87-row RFC4180 CSV and its 404 path, `POST /api/sentinel/audit`'s Event Log ingestion, all four servicing read turns, the contact-change tool's full approval round trip with its `actor:'human'` Event Log entry, §10's identity-pinning guarantee restated at the wire level for both a read and a write, and `POST /api/reset` keeping the servicing write path clean after a mutation. Explicitly NOT duplicated: the three-act scenario's own sequencing, which `lib/sentinel/scenario/demo-scenario.test.ts` already covers exhaustively in-process — there is no server-side stream for an HTTP script to drive, by construction (brief §9). Also explicitly not provable at the wire level: byte-level reversion of a mutated `phone` value, since no evidence kind (§10.3) ever surfaces `phone`/`mailingAddress` back to a caller — that specific reversion stays proven by `lib/soe/adapter.test.ts`'s direct-import unit test. `docs/wire-contract.md` §8 documents both boundaries in full, and the script's own coverage summary prints them on every run. Along the way the new servicing beats caught a real, demo-relevant issue — not an application bug, but a deployment hazard worth knowing about: `instrumentation.ts` registers the Event Log telemetry integration once per server process (its own header comment says so), so a dev server left running since before `updateContactInfo` was added to `lib/events/telemetry.ts`'s `ACTION_TOOL_NAMES` kept logging its execution as `tool.executed` instead of `action.executed` until restarted — invisible from the source tree, only catchable by hitting a live process. A cold-started server (exactly what `npm run verify:demo` does when nothing answers at `DEMO_REPLAY_URL`) never exhibits it. |

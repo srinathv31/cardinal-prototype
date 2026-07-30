@@ -32,11 +32,32 @@
 // jumps (`jumpToAct`) re-post every `auditWrite` they fast-forward through
 // same as normal playback; each replay is simply its own run in the shared
 // Event Log, which is fine.
+//
+// P3b (brief §6c, Act III beat 8, W3.4) extends that SAME `onMessage`
+// callback with one more fire-and-forget POST: when an `approvalResolved`
+// message arrives for `REMEDIATION_APPROVAL_ID` with `approved: true`, this
+// calls `POST /api/sentinel/remediate` — never awaited, never branched on,
+// exactly the audit write's own shape one line above. This is deliberately
+// a pure side effect with no observable role in playback: the
+// `RemediationReport` card that renders right after this in the SCRIPT is
+// already fully precomputed from `lib/sentinel/exception-fixture.ts`'s
+// fixture (demo-scenario.ts's `actThreeSteps`), not from this POST's
+// response — the response is read by nothing. That is what makes "the
+// network cable pulled" (brief §9) survivable here: a failed or offline
+// remediate call changes nothing the audience sees. It is still worth
+// making for real, though, because the route's own `confirmationId` is a
+// PURE function of the same `fixture.reportId` the scripted card already
+// used (`rem-${fixture.reportId}`, both derivations — see
+// app/api/sentinel/remediate/route.ts and demo-scenario.ts's
+// `remediationConfirmationId` — read the identical field), so the scripted
+// card and the route's real audit-log entry are byte-identical without
+// this call ever needing to feed data back into the stage.
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { ScenarioPlayer } from "@/lib/sentinel/scenario/player";
 import type { SentinelScenario, SentinelStageState } from "@/lib/sentinel/scenario/types";
 import type { PolicyDocument } from "@/lib/sentinel/policy";
+import { AGENT_ID, REMEDIATION_APPROVAL_ID, RUN_ID } from "@/lib/sentinel/scenario/demo-scenario";
 import { AuditStrip } from "./audit-strip";
 import { ContextRail } from "./context-rail";
 import { ConversationRail } from "./conversation-rail";
@@ -55,12 +76,24 @@ export function Stage({
     () =>
       new ScenarioPlayer(scenario, {
         onMessage: (message) => {
-          if (message.type !== "auditWrite") return;
-          fetch("/api/sentinel/audit", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(message.entry),
-          }).catch(() => {});
+          if (message.type === "auditWrite") {
+            fetch("/api/sentinel/audit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(message.entry),
+            }).catch(() => {});
+            return;
+          }
+          // Task 4 / brief §6c: the remediation gate's own execution POST.
+          // Fire-and-forget, exactly like the audit write above — see this
+          // file's header comment for why the response is never read.
+          if (message.type === "approvalResolved" && message.id === REMEDIATION_APPROVAL_ID && message.approved) {
+            fetch("/api/sentinel/remediate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ runId: RUN_ID, agentId: AGENT_ID }),
+            }).catch(() => {});
+          }
         },
       }),
     [scenario],
@@ -88,6 +121,19 @@ export function Stage({
     const pending = player.getSnapshot().pendingStageAction;
     if (pending) player.resolveStageAction(pending.id);
   }, [player]);
+  // Mirrors `onPolicyDrop` exactly (W1.1): reads the pending gate off the
+  // player rather than trusting a stale prop, and only resolves it when
+  // it's actually the `'prompt'` kind the conversation rail's input is for
+  // — `ConversationRail` itself disables the input outside that state, but
+  // this is the belt-and-suspenders check against a click racing a script
+  // advance.
+  const onSubmitPrompt = useCallback(
+    (text: string) => {
+      const pending = player.getSnapshot().pendingStageAction;
+      if (pending?.action === "prompt") player.resolveStageAction(pending.id, text);
+    },
+    [player],
+  );
 
   return (
     <div className="flex h-[calc(100vh-var(--spacing)*12)] min-h-0 flex-col gap-4">
@@ -97,6 +143,8 @@ export function Stage({
           turns={state.conversation}
           counter={state.counter}
           caption={state.counterCaption}
+          pendingStageAction={state.pendingStageAction}
+          onSubmitPrompt={onSubmitPrompt}
         />
         <LiveAgentGraph
           nodes={state.graph.nodes}

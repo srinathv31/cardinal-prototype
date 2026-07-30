@@ -14,6 +14,20 @@
 // render-step replace-in-place semantics) — kept prominent, not a small
 // pill, so the flip reads from the back of the room.
 //
+// Addendum P3b (brief §6d, Act III beat 1, W3.4): `storeMeta`, when present,
+// renders as a small monospace sub-header under the title — the rule
+// store's own label ("Rule store · continuous · nightly 02:00 UTC · last
+// run 4h ago"). Act III opens by re-rendering Act II's card under the SAME
+// id with `storeMeta` set (same-id replace-in-place, wire-contract §9.2), so
+// the card the audience already watched go proposed → active visibly
+// becomes a live rule store rather than a new card appearing. There is
+// deliberately no "Run now" button here: that control already exists as the
+// conversation rail's suggestion chip, which resolves the very next
+// `awaitStageAction: 'prompt'` gate (brief: "Run now is the conversation
+// rail's suggestion chip... do not add a second button"). A second,
+// decorative control that LOOKS like it triggers the sweep but does nothing
+// on click is worse than no control at all on a live stage.
+//
 // Addendum v2.1 (post-P4): a row with `evaluability: 'data-gap'` (Act II's
 // income-verification obligation, `policyObligationGap`) renders visually
 // distinct from R1–R3's `'evaluable'` rows — amber/muted accent instead of
@@ -46,13 +60,18 @@ const STATUS_PRESENTATION: Record<
   },
 };
 
-export function RuleDiff({ title, status, rules }: RuleDiffProps) {
+export function RuleDiff({ title, status, storeMeta, rules }: RuleDiffProps) {
   const statusPresentation = STATUS_PRESENTATION[status];
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 ring-1 ring-foreground/5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+          {storeMeta ? (
+            <p className="mt-0.5 font-mono text-xs text-muted-foreground">{storeMeta}</p>
+          ) : null}
+        </div>
         <span
           className={cn(
             "inline-flex items-center rounded-full px-3.5 py-1.5 text-sm font-semibold tracking-wide uppercase",

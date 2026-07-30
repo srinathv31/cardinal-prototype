@@ -240,6 +240,184 @@ describe('ScenarioPlayer — approval gate', () => {
   });
 });
 
+describe('ScenarioPlayer — awaitApproval.onDeny (P3b, brief §3 "reject path must work on demand")', () => {
+  const onDenyScenario: SentinelScenario = {
+    id: 'on-deny-test',
+    steps: [
+      { type: 'actMarker', act: 3, title: 'A' },
+      { type: 'counterUpdate', delayMs: 10, counter: { scanned: 1, exceptions: 1, remediated: 0 } },
+      {
+        type: 'awaitApproval',
+        id: 'approval-remediate',
+        payload: {
+          approvalId: 'approval-remediate',
+          toolName: 'remediate',
+          title: 'Remediate',
+          description: 'desc',
+          evidence: [],
+        },
+        audit: {
+          runId: 'run-1',
+          agentId: 'sentinel-test',
+          step: 0,
+          toolName: 'remediate',
+          inputSummary: 'in',
+          outputSummary: 'out',
+        },
+        onDeny: [
+          {
+            type: 'chatTurn',
+            delayMs: 10,
+            id: 'deny-chat',
+            role: 'agent',
+            text: 'Nothing executed. The run is closed.',
+          },
+          {
+            type: 'auditWrite',
+            delayMs: 10,
+            entry: {
+              runId: 'run-1',
+              agentId: 'sentinel-test',
+              step: 1,
+              toolName: 'remediate',
+              actor: 'agent',
+              kind: 'run.finished',
+              inputSummary: 'Declined',
+              outputSummary: 'Closed without action',
+            },
+          },
+          {
+            type: 'counterUpdate',
+            delayMs: 10,
+            counter: { scanned: 1, exceptions: 1, remediated: 0 },
+          },
+        ],
+      },
+      // The remainder of the ORIGINAL script — only reached on approve, or
+      // on a denial with no `onDeny` (there is none here to fall back to).
+      {
+        type: 'render',
+        delayMs: 10,
+        id: 'remediation-report',
+        instruction: { component: 'MetricRow', props: { metrics: [{ label: 'Removed', value: '1', tone: 'neutral' }] } },
+      },
+      { type: 'counterUpdate', delayMs: 10, counter: { scanned: 1, exceptions: 1, remediated: 1 } },
+    ],
+  };
+
+  it('a denial with onDeny plays the branch and never reaches the original remainder', () => {
+    const player = new ScenarioPlayer(onDenyScenario);
+    player.play();
+    vi.runAllTimers();
+    expect(player.getSnapshot().status).toBe('awaiting-approval');
+
+    player.resolveApproval('approval-remediate', false);
+    vi.runAllTimers();
+
+    const snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('done');
+    // The deny branch played...
+    expect(snapshot.conversation).toContainEqual({
+      id: 'deny-chat',
+      role: 'agent',
+      text: 'Nothing executed. The run is closed.',
+      done: true,
+    });
+    expect(snapshot.auditEntries.some((e) => e.kind === 'run.finished')).toBe(true);
+    expect(snapshot.counter).toEqual({ scanned: 1, exceptions: 1, remediated: 0 });
+    // ...and the ORIGINAL remainder (the RemediationReport render, the
+    // remediated:1 counter) never ran — no render landed, remediated stayed 0.
+    expect(snapshot.contextItems.some((item) => item.kind === 'render')).toBe(false);
+    expect(snapshot.messages.some((m) => m.type === 'render')).toBe(false);
+
+    // The denial itself is on the audit trail, actor human.
+    const denialEntry = snapshot.auditEntries.find((e) => e.kind === 'approval.denied');
+    expect(denialEntry?.actor).toBe('human');
+  });
+
+  it('a denial with NO onDeny continues the original script unchanged (v2 semantics)', () => {
+    const noOnDenyScenario: SentinelScenario = {
+      id: 'no-on-deny-test',
+      steps: onDenyScenario.steps.map((s) =>
+        s.type === 'awaitApproval' ? { ...s, onDeny: undefined } : s,
+      ),
+    };
+    const player = new ScenarioPlayer(noOnDenyScenario);
+    player.play();
+    vi.runAllTimers();
+
+    player.resolveApproval('approval-remediate', false);
+    vi.runAllTimers();
+
+    const snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('done');
+    // Playback sailed on into the ORIGINAL remainder, exactly as v2 did —
+    // the render step ran and the counter reached remediated:1, even though
+    // the gate was denied.
+    expect(snapshot.contextItems.some((item) => item.kind === 'render' && item.id === 'remediation-report')).toBe(
+      true,
+    );
+    expect(snapshot.counter).toEqual({ scanned: 1, exceptions: 1, remediated: 1 });
+  });
+
+  it('approval is entirely unaffected by the presence of onDeny', () => {
+    const player = new ScenarioPlayer(onDenyScenario);
+    player.play();
+    vi.runAllTimers();
+
+    player.resolveApproval('approval-remediate', true);
+    vi.runAllTimers();
+
+    const snapshot = player.getSnapshot();
+    expect(snapshot.status).toBe('done');
+    expect(snapshot.contextItems.some((item) => item.kind === 'render' && item.id === 'remediation-report')).toBe(
+      true,
+    );
+    expect(snapshot.counter).toEqual({ scanned: 1, exceptions: 1, remediated: 1 });
+    // No deny-branch content anywhere.
+    expect(snapshot.conversation.some((t) => t.id === 'deny-chat')).toBe(false);
+    expect(snapshot.auditEntries.some((e) => e.kind === 'run.finished')).toBe(false);
+  });
+
+  it('reset() after a deny → onDeny run restores a byte-identical fresh run, and replaying is identical to a clean run', () => {
+    const fresh = new ScenarioPlayer(onDenyScenario);
+    const freshSnapshot = fresh.getSnapshot();
+
+    const player = new ScenarioPlayer(onDenyScenario);
+    player.play();
+    vi.runAllTimers();
+    player.resolveApproval('approval-remediate', false);
+    vi.runAllTimers();
+    expect(player.getSnapshot().status).toBe('done'); // sanity: the deny branch actually ran
+
+    player.reset();
+    expect(player.getSnapshot()).toEqual(freshSnapshot);
+
+    // Replay clean (approve this time) — proves the working step queue was
+    // fully restored, not left spliced from the earlier deny.
+    player.play();
+    vi.runAllTimers();
+    player.resolveApproval('approval-remediate', true);
+    vi.runAllTimers();
+
+    const replayed = player.getSnapshot();
+    expect(replayed.status).toBe('done');
+    expect(replayed.contextItems.some((item) => item.kind === 'render' && item.id === 'remediation-report')).toBe(
+      true,
+    );
+    expect(replayed.counter).toEqual({ scanned: 1, exceptions: 1, remediated: 1 });
+
+    // And a clean run over the same scenario (no prior deny at all) produces
+    // the byte-identical message log — the earlier deny left no residue.
+    const clean = new ScenarioPlayer(onDenyScenario);
+    clean.play();
+    vi.runAllTimers();
+    clean.resolveApproval('approval-remediate', true);
+    vi.runAllTimers();
+    expect(JSON.stringify(replayed.messages)).toBe(JSON.stringify(clean.getSnapshot().messages));
+  });
+});
+
 describe('ScenarioPlayer — pause/resume determinism', () => {
   const pauseScenario: SentinelScenario = {
     id: 'pause-test',

@@ -12,11 +12,14 @@
 // event to build a hero card around. `RuleDiff`, `RuleCitation`, and
 // `DecisionCard` all survive the re-point unchanged; only their doc-comment
 // examples are updated below to the AU policy's actual language
-// (lib/sentinel/policy.ts). P3 (brief §5c) adds two new components this
-// file does not yet define: `PolicyExceptionTable` (the aggregate flagged-
-// relationship table Act III renders) and `RemediationReport` (the
-// post-approval outcome card) — both documented in
-// docs/wire-contract.md §9.6 once they land.
+// (lib/sentinel/policy.ts). P3 (brief §5c) adds the final two:
+// `PolicyExceptionTable` (the aggregate flagged-relationship table Act III
+// renders) and `RemediationReport` (the post-approval outcome card). Both
+// are fed by `lib/sentinel/exception-fixture.ts` — the single server-only,
+// deterministic derivation off `getAuScanPortfolio()` + `evaluateAuPolicy()`
+// that also backs `GET /api/sentinel/report`'s CSV, so the table, the
+// report card, and the download can never drift against each other (brief
+// §6c). Documented in docs/wire-contract.md §9.6 once P5's doc pass lands.
 //
 // `SentinelRenderInstruction` widens the v1 `RenderInstruction` union with
 // `RuleDiff`, `RuleCitation`, and `DecisionCard`; every `render` step on the
@@ -34,6 +37,19 @@ export const ruleDiffPropsSchema = z.object({
    * presenter approves activation (brief §3 Act II beat 4) — set by the
    * scenario step, never inferred client-side. */
   status: z.enum(['proposed', 'active']),
+  /**
+   * v3 addition (brief §6d, Act III beat 1, W3.4) — the rule store's own
+   * label, e.g. "Rule store · continuous · nightly 02:00 UTC · last run 4h
+   * ago". Optional: Act II's rows render without it (there's no store to
+   * label until the rules are active); Act III re-renders this SAME card
+   * under the SAME render id with `storeMeta` set, so the card the audience
+   * already watched go proposed → active visibly becomes a live rule store,
+   * not a new card. "Continuous"/"nightly 02:00 UTC" is a LABEL, not a
+   * mechanism (brief §6d: "do not build a scheduler") — nothing in this
+   * build schedules anything; the string is preformatted chrome, same as
+   * every other display value in this file.
+   */
+  storeMeta: z.string().optional(),
   rules: z
     .array(
       z.object({
@@ -187,6 +203,96 @@ export const decisionCardPropsSchema = z.object({
 });
 export type DecisionCardProps = z.infer<typeof decisionCardPropsSchema>;
 
+/** One flagged authorized-user relationship — the shared row shape between
+ * `PolicyExceptionTable` (the full aggregate, brief §3 Act III beat 3) and
+ * `RemediationReport` (the same rows, sliced to the first N, as a receipt
+ * after execution, beat 8). Every field is preformatted server-side by
+ * `lib/sentinel/exception-fixture.ts`'s `AuExceptionRow` — the same fixture
+ * `GET /api/sentinel/report`'s CSV reads from — so the table, the report
+ * card, and the download artifact are three views of one derivation, never
+ * three places a number could drift (brief §6c). This renderer performs no
+ * lookups and no arithmetic on any of these fields (brief §5a/§5b). */
+const auExceptionRowSchema = z.object({
+  /** e.g. "Nguyen household · ••4821" — the account's PRIMARY party's
+   * household name plus a masked account identifier. Never the AU's own
+   * name: the row's subject is the flagged relationship, and the account
+   * label answers "whose account," not "who was added." */
+  accountLabel: z.string(),
+  /** The flagged authorized user's name. */
+  authorizedUser: z.string(),
+  /** e.g. "R1" — lets a reader correlate a row against the by-rule
+   * `BarBreakdown` split rendered alongside this table. */
+  ruleId: z.enum(['R1', 'R2', 'R3']),
+  /** e.g. "R1 · Product Eligibility" — rule id plus a short name, so the
+   * rule mix scans without a legend (brief §5c/W3.1). */
+  ruleShortName: z.string(),
+  /** The specific finding, preformatted, e.g. "Secured card · deposit
+   * $500.00 · AU added Mar 14, 2024" (brief §5c's own example). */
+  finding: z.string(),
+  /** Preformatted display date, e.g. "Mar 14, 2024" — when the
+   * authorized-user relationship was added, not when the exception was
+   * found. */
+  addedDate: z.string(),
+});
+
+/** `PolicyExceptionTable` (Act III, brief §3 beat 3 / §5c / W3.1) — the
+ * aggregate flagged-relationship table the sweep renders: 12 of 87 rows on a
+ * projector, each citing the rule it breaks. Pure renderer, zero derivation:
+ * every string arrives preformatted (`auExceptionRowSchema` above); this
+ * component performs no `toLocaleString`, no date math, no currency
+ * formatting — that all happened once, server-side, in
+ * `lib/sentinel/exception-fixture.ts`.
+ *
+ * `footnote` follows the SAME showing/total convention `TransactionTable`
+ * already established (`lib/registry/schemas.ts`,
+ * `lib/agents/ask/resolvers.ts`'s `Showing ${rows.length} of ${total}…`) —
+ * one preformatted sentence carrying both counts, not a second structured
+ * `showing`/`total` pair invented for this table alone. */
+export const policyExceptionTablePropsSchema = z.object({
+  title: z.string(),
+  rows: z.array(auExceptionRowSchema).min(1).max(25),
+  /** e.g. "Showing 12 of 87 exceptions." */
+  footnote: z.string().optional(),
+});
+export type PolicyExceptionTableProps = z.infer<typeof policyExceptionTablePropsSchema>;
+
+/** `RemediationReport` (Act III, brief §3 beat 8 / §5c / W3.2) — the
+ * post-approval outcome card: what actually executed, in the same
+ * preformatted vocabulary the exception table used. `counters` mirrors
+ * `InterestProjectionChart.callouts`'s `{ label, value }` shape
+ * (`lib/registry/schemas.ts`) rather than inventing a third stat-callout
+ * convention. `rows` reuses `auExceptionRowSchema` verbatim — the scenario
+ * step slices the same fixture's rows to the first N, it does not
+ * re-describe them.
+ *
+ * `downloadUrl` is optional BY DESIGN, not an oversight: brief §6c requires
+ * the demo to survive "the network cable pulled," so an absent URL must
+ * degrade the Download CSV control to disabled with a quiet reason
+ * (components/sentinel/evidence/remediation-report.tsx), never to a dead
+ * link or a thrown error. */
+export const remediationReportPropsSchema = z.object({
+  title: z.string(),
+  /** Outcome counters — brief's own list: removed, accounts touched,
+   * notifications queued. Not constrained to exactly three so a future
+   * counter (e.g. a decline count on the reject path) doesn't need a schema
+   * change to add. */
+  counters: z
+    .array(z.object({ label: z.string(), value: z.string() }))
+    .min(1)
+    .max(6),
+  /** Deterministically derived from the fixture, never random — see
+   * app/api/sentinel/remediate/route.ts's derivation and brief §9's
+   * "byte-identical across replays" requirement. */
+  confirmationId: z.string(),
+  rows: z.array(auExceptionRowSchema).min(1).max(25),
+  /** Same showing/total convention as `PolicyExceptionTable.footnote`. */
+  footnote: z.string().optional(),
+  /** `GET /api/sentinel/report?reportId=…`. Absent → the control renders
+   * disabled (see the component's doc comment above). */
+  downloadUrl: z.string().optional(),
+});
+export type RemediationReportProps = z.infer<typeof remediationReportPropsSchema>;
+
 /** `RenderInstruction` (v1, `lib/registry/schemas.ts`) widened with the
  * Sentinel-only components. Every `render` step on the Sentinel stream
  * carries this type instead of the plain v1 one (types.ts). */
@@ -195,9 +301,19 @@ export const sentinelRenderInstructionSchema = z.union([
   z.object({ component: z.literal('RuleDiff'), props: ruleDiffPropsSchema }),
   z.object({ component: z.literal('RuleCitation'), props: ruleCitationPropsSchema }),
   z.object({ component: z.literal('DecisionCard'), props: decisionCardPropsSchema }),
+  z.object({
+    component: z.literal('PolicyExceptionTable'),
+    props: policyExceptionTablePropsSchema,
+  }),
+  z.object({
+    component: z.literal('RemediationReport'),
+    props: remediationReportPropsSchema,
+  }),
 ]);
 export type SentinelRenderInstruction =
   | RenderInstruction
   | { component: 'RuleDiff'; props: RuleDiffProps }
   | { component: 'RuleCitation'; props: RuleCitationProps }
-  | { component: 'DecisionCard'; props: DecisionCardProps };
+  | { component: 'DecisionCard'; props: DecisionCardProps }
+  | { component: 'PolicyExceptionTable'; props: PolicyExceptionTableProps }
+  | { component: 'RemediationReport'; props: RemediationReportProps };

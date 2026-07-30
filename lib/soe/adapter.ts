@@ -180,3 +180,57 @@ export async function getAuScanPortfolio(): Promise<AuPortfolioSnapshot> {
     payments: [...collectionPayments, ...v1Payments],
   };
 }
+
+// v3 "servicing chatbot" addition (CARDINAL_V3_AU_BRIEF.md §7c) — the
+// adapter's one write path. Everything above this line is a getter; this is
+// the eighth function on what was a seven-getter module, and it stays that
+// shape: exactly one mutation, nothing else. It mutates the cached SeedDb's
+// Party record in place (the same in-memory object every getter above already
+// reads through `getDb()`), so the change is visible to every subsequent read
+// without re-threading state anywhere else.
+
+export interface PartyContactPatch {
+  phone?: string;
+  mailingAddress?: string;
+}
+
+/**
+ * Applies a partial contact-info patch to one party, in place, and returns
+ * the updated record. The servicing agent's only side-effecting tool
+ * (lib/agents/servicing/tools.ts's `updateContactInfo`) is the sole caller,
+ * and only after human approval (CARDINAL_V3_AU_BRIEF.md §7c — the same
+ * AI SDK tool-approval pause every other action tool uses, pointed at the
+ * customer instead of an ops user). Real account-takeover surface in
+ * production; step-up authentication in front of this call is the
+ * production control (see the comment on `updateContactInfo` — this
+ * prototype's confirmation gate plus the audit-log entry are what stand in
+ * for it here).
+ */
+export async function updatePartyContact(
+  partyId: string,
+  patch: PartyContactPatch,
+): Promise<Party> {
+  const party = getDb().parties.find((p) => p.partyId === partyId);
+  if (!party) throw new Error(`SOE: unknown party ${partyId}`);
+  if (patch.phone !== undefined) party.phone = patch.phone;
+  if (patch.mailingAddress !== undefined) party.mailingAddress = patch.mailingAddress;
+  return party;
+}
+
+/**
+ * Demo-reset hook, NOT a second mutation on the party/account data model —
+ * lifecycle plumbing, same spirit as lib/events/store.ts's own `reset()`
+ * export sitting alongside its getters. `getDb()` above only rebuilds the
+ * cached SeedDb when the demo anchor's ISO string changes (once a day in
+ * practice), so a live server would otherwise carry an `updatePartyContact`
+ * mutation across every subsequent "Reset demo" click. Dropping the cache
+ * here forces the next read to rebuild fresh from the deterministic
+ * generator, discarding that one in-memory mutation — exactly what "POST
+ * /api/reset must restore it" (CARDINAL_V3_AU_BRIEF.md §7c) requires.
+ * Called from app/api/reset/route.ts; proven by lib/soe/adapter.test.ts
+ * rather than assumed.
+ */
+export function resetSoeState(): void {
+  db = null;
+  dbAnchorIso = null;
+}

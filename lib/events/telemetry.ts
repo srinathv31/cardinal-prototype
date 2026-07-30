@@ -29,8 +29,21 @@ import { append } from './store';
 
 /** Side-effecting tools whose completion is an executed ACTION, not a plain
  * evidence fetch (docs/wire-contract.md §5 — 'action.executed' vs
- * 'tool.executed'). Extend this when P2 agents add their own action tools. */
-const ACTION_TOOL_NAMES = new Set(['proposeDueDateChange', 'sendOutreachDraft']);
+ * 'tool.executed'). Extend this whenever an agent gains an action tool.
+ *
+ * `updateContactInfo` (v3, lib/agents/servicing/tools.ts) is the servicing
+ * chatbot's contact-information write — the first mutation in `lib/soe`
+ * (CARDINAL_V3_AU_BRIEF.md §7c) and unambiguously an executed action, not a
+ * read. Its human approval decision is logged independently by the stream
+ * route (`approval.granted`/`approval.denied`, `actor: 'human'`), so the
+ * omission would not have lost the gate — but it would have hidden the
+ * WRITE from anyone scanning the Event Log for `action.executed`, which is
+ * precisely the reviewer this distinction exists for. */
+const ACTION_TOOL_NAMES = new Set([
+  'proposeDueDateChange',
+  'sendOutreachDraft',
+  'updateContactInfo',
+]);
 
 interface RunContext {
   runId: string;

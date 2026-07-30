@@ -4,11 +4,11 @@
 // delegate unchanged (unknown names still fall through to its
 // console-error-never-throw path, demo-safety brief §9); Sentinel-only
 // components (wire-contract §9.6) route here: `RuleDiff`, `RuleCitation`,
-// `DecisionCard`. v3 removed `BTEventDetail` (docs/v3-migration-map.md
+// `DecisionCard`, and P3's `PolicyExceptionTable` / `RemediationReport`. v3
+// removed `BTEventDetail` (docs/v3-migration-map.md
 // §2b) — there is no single-event hero card when the investigation is an
 // aggregate sweep over the whole book, so its import and routing branch are
-// gone along with it. P3 adds `PolicyExceptionTable` and `RemediationReport`
-// here the same way, once they exist.
+// gone along with it.
 //
 // `OutreachDraftCard` is the one v1 registry member routed HERE instead of
 // delegated: v1's EvidenceRenderer refuses it by design (in v1 it renders
@@ -21,6 +21,8 @@
 import { EvidenceRenderer, OutreachDraftCard } from "@/components/registry";
 import type { SentinelRenderInstruction } from "@/lib/sentinel/registry";
 import { DecisionCard } from "./decision-card";
+import { PolicyExceptionTable } from "./policy-exception-table";
+import { RemediationReport } from "./remediation-report";
 import { RuleCitation } from "./rule-citation";
 import { RuleDiff } from "./rule-diff";
 
@@ -34,6 +36,10 @@ export function SentinelEvidenceRenderer({
     return <RuleCitation {...instruction.props} />;
   if (instruction.component === "DecisionCard")
     return <DecisionCard {...instruction.props} />;
+  if (instruction.component === "PolicyExceptionTable")
+    return <PolicyExceptionTable {...instruction.props} />;
+  if (instruction.component === "RemediationReport")
+    return <RemediationReport {...instruction.props} />;
   if (instruction.component === "OutreachDraftCard")
     return <OutreachDraftCard {...instruction.props} />;
   return <EvidenceRenderer instruction={instruction} />;

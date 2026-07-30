@@ -7,6 +7,17 @@ export interface Party {
   fullName: string;
   dateOfBirth: string; // ISO date
   email: string;
+  /**
+   * v3 "servicing chatbot" additions (CARDINAL_V3_AU_BRIEF.md §7c) — contact
+   * fields the servicing agent's one write path (`updatePartyContact`,
+   * lib/soe/adapter.ts) can change. Both optional so v1's fixtures and its
+   * pinned tests are unaffected: only the pinned cardholder (and, for
+   * consistency, the rest of v1's named cast) carries seed values; every
+   * other party — background accounts, the AU portfolio — reads `undefined`,
+   * which no consumer treats as an error.
+   */
+  phone?: string;
+  mailingAddress?: string;
 }
 
 export interface Account {

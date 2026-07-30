@@ -75,12 +75,22 @@ export function buildPatel(anchor: Date): {
       fullName: 'Anand Patel',
       dateOfBirth: '1974-02-27',
       email: 'anand.patel@example.com',
+      // Anand is the servicing chatbot's pinned cardholder (brief §7a,
+      // lib/agents/servicing/identity.ts) — the only party whose contact
+      // fields the demo actually exercises through `updatePartyContact`.
+      // Priya/Dev carry seed values too, for the same reason v1's other
+      // named personas do below: the field reads as real data, not a
+      // one-off hack for a single row.
+      phone: '(512) 555-0142',
+      mailingAddress: '4118 Barton Skyway, Austin, TX 78746',
     },
     {
       partyId: PRIYA_PARTY_ID,
       fullName: 'Priya Patel',
       dateOfBirth: '1976-09-08',
       email: 'priya.patel@example.com',
+      phone: '(512) 555-0187',
+      mailingAddress: '4118 Barton Skyway, Austin, TX 78746',
     },
     {
       partyId: DEV_PARTY_ID,
@@ -88,6 +98,8 @@ export function buildPatel(anchor: Date): {
       dateOfBirth: dateOnly(anchor, -8170),
       fullName: 'Dev Patel',
       email: 'dev.patel@example.com',
+      phone: '(512) 555-0163',
+      mailingAddress: '4118 Barton Skyway, Austin, TX 78746',
     },
   ];
 

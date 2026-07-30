@@ -107,6 +107,12 @@ export function buildMarcus(anchor: Date): {
     fullName: 'Marcus Webb',
     dateOfBirth: '1987-06-02',
     email: 'marcus.webb@example.com',
+    // v3 contact fields (CARDINAL_V3_AU_BRIEF.md §7c) — not exercised by the
+    // servicing chatbot (Patel is the pinned cardholder,
+    // lib/agents/servicing/identity.ts) but seeded for the rest of v1's cast
+    // so `Party.phone`/`mailingAddress` reads as real data across the board.
+    phone: '(214) 555-0118',
+    mailingAddress: '2209 Maple Ave, Dallas, TX 75201',
   };
 
   const account: Account = {

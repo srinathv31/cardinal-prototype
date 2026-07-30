@@ -77,6 +77,15 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
       z.object({ kind: z.literal('bt-overview'), accountId }),
       z.object({ kind: z.literal('au-recurring-spend'), accountId, partyId }),
       z.object({ kind: z.literal('portfolio-overview') }),
+      // v3 servicing chatbot additions (CARDINAL_V3_AU_BRIEF.md §7a/§7b) —
+      // deliberately carry NO accountId/partyId field. The servicing agent's
+      // account is pinned server-side at construction
+      // (lib/agents/servicing/identity.ts); these two kinds have nothing for
+      // a model-supplied id to even occupy, which is what "resolvers ignore
+      // any model-supplied account id" means enforced by construction rather
+      // than by validation.
+      z.object({ kind: z.literal('servicing-next-payment') }),
+      z.object({ kind: z.literal('servicing-account-summary') }),
     ]),
   }),
   z.object({
@@ -142,16 +151,30 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
   }),
   z.object({
     component: z.literal('CategoryPie'),
-    source: z.object({ kind: z.literal('portfolio-category-spend'), months: spendMonths }),
+    source: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('portfolio-category-spend'), months: spendMonths }),
+      // v3 servicing chatbot addition (CARDINAL_V3_AU_BRIEF.md §7b) — no
+      // accountId, same reasoning as the MetricRow kinds above.
+      z.object({ kind: z.literal('servicing-category-spend'), months: spendMonths }),
+    ]),
   }),
   z.object({
     component: z.literal('TransactionTable'),
-    source: z.object({
-      kind: z.literal('recent-transactions'),
-      accountId: accountId.optional().describe('Omit for a portfolio-wide table'),
-      months: spendMonths,
-      limit: rowLimit,
-    }),
+    source: z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('recent-transactions'),
+        accountId: accountId.optional().describe('Omit for a portfolio-wide table'),
+        months: spendMonths,
+        limit: rowLimit,
+      }),
+      // v3 servicing chatbot addition (CARDINAL_V3_AU_BRIEF.md §7b) — no
+      // accountId, same reasoning as the MetricRow kinds above.
+      z.object({
+        kind: z.literal('servicing-recent-transactions'),
+        months: spendMonths,
+        limit: rowLimit,
+      }),
+    ]),
   }),
 ]);
 export type EvidenceSpec = z.infer<typeof evidenceSpecSchema>;

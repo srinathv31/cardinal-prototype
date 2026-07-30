@@ -7,15 +7,21 @@
 // with the typing effect (brief §4). Pure renderer of `Stage`'s
 // `ScenarioPlayer` snapshot (v1 invariant 5b): every figure below comes
 // from props, nothing is fetched or derived from lib/soe or lib/sentinel
-// here — only types cross that boundary.
+// here — only types cross that boundary. No player import — the prompt
+// input calls back through `onSubmitPrompt` exactly like `stage.tsx`'s
+// existing `onPolicyDrop` idiom for the policy-drop gate; this component
+// never touches `resolveStageAction` itself.
 //
-// This is the READ-ONLY half of W1.1: the transcript and the counter/beat
-// footer. The prompt input, the `awaitStageAction: 'prompt'` enable/disable
-// gating, and the suggestion chip land in P1 alongside `buildDemoScenario` —
-// there is no real script yet for a presenter to type against, so wiring an
-// input here would have nothing to submit to. `turns` is already exactly
-// the shape a future input would append to (`SentinelChatTurn`), so P1 adds
-// UI, not a new data shape.
+// P0 shipped the read-only half (transcript + counter/beat footer); this is
+// P1's other half: the prompt input, the `awaitStageAction: 'prompt'`
+// enable/disable gating, and the suggestion chip (brief §4, §6a). The rail
+// never resolves the gate itself and never appends the submitted text to
+// `turns` locally — `ScenarioPlayer#resolveStageAction` is the one place
+// that happens (player.ts: a `'prompt'` gate resolved with non-empty text
+// publishes the verbatim echoed `chatTurn` and pushes it onto
+// `conversation` before `stageActionResolved`), so appending here too would
+// double the bubble. This rail only ever calls `onSubmitPrompt` and clears
+// its own input.
 //
 // Modeled on the deleted event-replay-rail.tsx's panel chrome (rounded-xl
 // border/card/ring, uppercase tracking-wide header, counter tiles) and on
@@ -24,18 +30,24 @@
 // old newest-first rail, so it needs the scroll-follow effect the old one
 // never did.
 
-import { useEffect, useRef } from "react";
-import type { SentinelChatTurn, SentinelCounter } from "@/lib/sentinel/scenario/types";
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import type { SentinelChatTurn, SentinelCounter, SentinelStageState } from "@/lib/sentinel/scenario/types";
 import { cn } from "@/lib/utils";
 
 export function ConversationRail({
   turns,
   counter,
   caption,
+  pendingStageAction,
+  onSubmitPrompt,
 }: {
   turns: SentinelChatTurn[];
   counter: SentinelCounter;
   caption?: string;
+  pendingStageAction: SentinelStageState["pendingStageAction"];
+  onSubmitPrompt?: (text: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -75,14 +87,27 @@ export function ConversationRail({
         )}
       </div>
 
+      <PromptInput
+        // Remounts (fresh `useState("")`) whenever the pending gate's identity
+        // changes — the gate that made this input live can resolve from
+        // elsewhere too (the suggestion chip below, or a rehearsal
+        // `jumpToAct` fast-forward), so keying on it clears any half-typed
+        // text the instant that happens without a setState-in-effect
+        // (react-hooks/set-state-in-effect); a later gate never starts
+        // pre-filled with a stale draft.
+        key={pendingStageAction?.id ?? "none"}
+        pendingStageAction={pendingStageAction}
+        onSubmitPrompt={onSubmitPrompt}
+      />
+
       <footer className="shrink-0 border-t border-border px-4 py-3.5">
         {caption ? (
           <div className="animate-in fade-in zoom-in-95 flex flex-col gap-1 duration-700">
-            <p className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+            <p className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">{caption}</p>
+            <p className="text-sm text-muted-foreground">
               {counter.scanned} scanned · {counter.exceptions} exception
               {counter.exceptions === 1 ? "" : "s"} · {counter.remediated} remediated
             </p>
-            <p className="text-sm text-muted-foreground">{caption}</p>
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-2">
@@ -103,6 +128,70 @@ export function ConversationRail({
         )}
       </footer>
     </section>
+  );
+}
+
+/** The prompt input (brief §4, W1.1). Enabled only while the player is
+ * hard-blocked on a `'prompt'` stage action — every other status (including
+ * `'policy-drop'`, the other `awaitStageAction` kind) leaves it disabled
+ * and visibly inert rather than hidden: "a control that appears and
+ * disappears is worse on a projector than one that greys out" (brief §4).
+ *
+ * Submitting never string-matches (brief §9's hard rule) — any non-empty,
+ * non-whitespace text calls `onSubmitPrompt` verbatim and the player's own
+ * `resolveStageAction` does the actual gate-resolving and echoing (this
+ * file's header comment). Whitespace-only submission is a no-op: it would
+ * otherwise resolve the gate with nothing for the presenter to show and
+ * hand the rail an empty bubble. */
+function PromptInput({
+  pendingStageAction,
+  onSubmitPrompt,
+}: {
+  pendingStageAction: SentinelStageState["pendingStageAction"];
+  onSubmitPrompt?: (text: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  const enabled = pendingStageAction?.action === "prompt" && !!onSubmitPrompt;
+  const suggested = pendingStageAction?.action === "prompt" ? pendingStageAction.suggested : undefined;
+
+  function submit(text: string) {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return; // whitespace-only is a no-op, never resolves the gate
+    onSubmitPrompt?.(trimmed);
+    setValue("");
+  }
+
+  return (
+    <div className="shrink-0 border-t border-border px-4 py-3">
+      {enabled && suggested ? (
+        <button
+          type="button"
+          onClick={() => submit(suggested)}
+          className="mb-2 block w-full truncate rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-left text-sm font-medium text-primary transition-colors hover:bg-primary/15"
+        >
+          {suggested}
+        </button>
+      ) : null}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit(value);
+        }}
+        className="flex items-center gap-2"
+      >
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={!enabled}
+          placeholder={enabled ? "Type a prompt…" : "Waiting for the script…"}
+          aria-label="Conversation prompt"
+          className="disabled:opacity-50"
+        />
+        <Button type="submit" size="sm" disabled={!enabled || value.trim().length === 0}>
+          Send
+        </Button>
+      </form>
+    </div>
   );
 }
 

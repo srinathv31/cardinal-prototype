@@ -1,12 +1,16 @@
-// Sentinel stage route (brief §4). P0 placeholder: with `buildDemoScenario`
-// torn down alongside the rest of the v2 BT script (docs/v3-migration-map.md
-// §2b), this route has nothing of its own to assemble yet — it renders the
-// graph-rehearsal fixture (lib/sentinel/scenario/graph-rehearsal.ts) as the
-// only scenario there is, unconditionally, for both the bare route and its
-// `?scenario=graph-rehearsal` query string. P1's `buildDemoScenario`
-// (rebuilt fresh for the AU policy script, lib/sentinel/scenario/) replaces
-// this once Act I lands — do not read this file as a preview of the real
-// three-act demo; it isn't one yet, and no query string here reaches one.
+// Sentinel stage route (brief §4). Defaults to the real three-act AU-policy
+// demo (`buildDemoScenario`, lib/sentinel/scenario/demo-scenario.ts) — the
+// P0 placeholder that pointed this route at `graphRehearsalScenario`
+// unconditionally is gone now that P1 has something real to play
+// (docs/v3-migration-map.md §7). `?scenario=graph-rehearsal` keeps working
+// as the presenter's rehearsal-loop escape hatch (graph-rehearsal.ts's
+// header comment) — the only other value this query string recognizes.
+//
+// `buildDemoScenario` is `async` (demo-scenario.ts's header comment: the
+// seam Act III needs to pull its aggregate figures from `lib/soe`), so this
+// server component awaits it before handing `<Stage>` a plain
+// `SentinelScenario` — `Stage` itself stays synchronous and player-owning,
+// unchanged from P0.
 //
 // `policyDocument` (lib/sentinel/policy.ts) is checked-in content, not seed
 // data — the "all data access goes through lib/soe" rule (CLAUDE.md) governs
@@ -16,16 +20,29 @@
 //
 // `force-dynamic` mirrors app/runs/page.tsx's note: seed dates are day
 // offsets from the demo anchor (start of today, UTC), so a statically
-// prerendered page would freeze anchor-derived facts at build time. Nothing
-// on this placeholder route is anchor-derived yet, but P1's real scenario
-// will be, so the export stays in place ahead of that.
+// prerendered page would freeze anchor-derived facts at build time. Act I
+// carries no anchor-derived figures yet, but Act III will, so the export
+// stays in place ahead of that.
 
 import { Stage } from "@/components/sentinel/stage";
+import { buildDemoScenario } from "@/lib/sentinel/scenario/demo-scenario";
 import { graphRehearsalScenario } from "@/lib/sentinel/scenario/graph-rehearsal";
 import { policyDocument } from "@/lib/sentinel/policy";
 
 export const dynamic = "force-dynamic";
 
-export default function SentinelPage() {
-  return <Stage scenario={graphRehearsalScenario} policyDocument={policyDocument} />;
+export default async function SentinelPage({
+  searchParams,
+}: {
+  // Next 16: searchParams is a Promise (app/runs/page.tsx's identical note)
+  // — await it before reading anything off it.
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const { scenario: scenarioParam } = await searchParams;
+  const scenarioValue = Array.isArray(scenarioParam) ? scenarioParam[0] : scenarioParam;
+
+  const scenario =
+    scenarioValue === "graph-rehearsal" ? graphRehearsalScenario : await buildDemoScenario();
+
+  return <Stage scenario={scenario} policyDocument={policyDocument} />;
 }

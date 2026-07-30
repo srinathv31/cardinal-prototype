@@ -32,6 +32,16 @@
 // against `suggested` (wire-contract §9.2's verbatim-echo rule, §9.5
 // guarantee 5).
 //
+// P3b addition: `AwaitApprovalStep.onDeny` (brief §3, "reject path must work
+// on demand" — types.ts's doc comment has the contract). The playback cursor
+// no longer walks `scenario.steps` directly; it walks a private working copy
+// (`this.steps`, seeded fresh from `scenario.steps` in `initializeState`) so
+// a denial carrying `onDeny` can splice the remainder of THAT copy without
+// ever touching the scenario's own array — `reset()` re-seeds `this.steps`
+// from `scenario.steps` again, so the original script is never at risk of
+// staying spliced across a reset. See `resolveApproval` below for the
+// splice itself.
+//
 // This is 100% scripted (brief §10) — no imports from 'ai', no live model.
 
 import type {
@@ -44,6 +54,7 @@ import type {
   GraphStep,
   PolicyPanelStep,
   RenderStep,
+  ScenarioStep,
   ScenarioTimedStep,
   SentinelChatTurn,
   SentinelContextItem,
@@ -88,6 +99,16 @@ export class ScenarioPlayer {
   private readonly onMessage?: (message: SentinelStreamMessage) => void;
   private readonly listeners = new Set<() => void>();
 
+  /** The WORKING step queue — seeded from `scenario.steps` in
+   * `initializeState()`, never the scenario's own array. Everything that
+   * walks playback (`play`, `advance`, `jumpToAct`) reads this, not
+   * `scenario.steps`, so `resolveApproval`'s `onDeny` splice (below) can
+   * replace the remainder of a run without mutating the checked-in scenario
+   * object — `reset()` calling `initializeState()` again is what restores
+   * the pristine queue (header comment; types.ts's `AwaitApprovalStep.onDeny`
+   * doc comment). */
+  private steps: ScenarioStep[] = [];
+
   // Playback cursor + timer bookkeeping.
   private stepIndex = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -125,6 +146,7 @@ export class ScenarioPlayer {
   constructor(scenario: SentinelScenario, options?: { onMessage?: (message: SentinelStreamMessage) => void }) {
     this.scenario = scenario;
     this.onMessage = options?.onMessage;
+    this.steps = scenario.steps.slice();
     this.snapshot = this.buildSnapshot();
   }
 
@@ -147,7 +169,7 @@ export class ScenarioPlayer {
     // 'idle', stepIndex 0 pointing at act I's marker) and resuming after a
     // mid-demo act boundary (status 'paused' for the same reason).
     if (this.remainingWaitMs === null) {
-      const current = this.scenario.steps[this.stepIndex];
+      const current = this.steps[this.stepIndex];
       if (current?.type === 'actMarker') {
         this.consumeMarker(current);
       }
@@ -211,7 +233,7 @@ export class ScenarioPlayer {
    */
   jumpToAct(act: 1 | 2 | 3): void {
     this.reset();
-    const steps = this.scenario.steps;
+    const steps = this.steps;
 
     while (this.stepIndex < steps.length) {
       const step = steps[this.stepIndex];
@@ -271,7 +293,20 @@ export class ScenarioPlayer {
     this.commit();
   }
 
-  /** No-op unless this approval is the one currently pending. */
+  /**
+   * No-op unless this approval is the one currently pending. On a DENIAL
+   * whose step carries `onDeny` (types.ts's `AwaitApprovalStep.onDeny` doc
+   * comment), the working step queue (`this.steps`) is truncated right
+   * after this step and `onDeny`'s steps are appended in its place —
+   * REPLACING the remainder of the run, not inserting alongside it. This
+   * only ever touches `this.steps`, the per-instance working copy
+   * `initializeState()` re-seeds from `scenario.steps` on every
+   * construction/`reset()` — the scenario's own array is never written to,
+   * so a later `reset()` always restores the pristine original script
+   * (player.test.ts's deny → reset → replay coverage). An approval, or a
+   * denial with no `onDeny`, leaves `this.steps` untouched — exactly
+   * today's behavior.
+   */
   resolveApproval(id: string, approved: boolean): void {
     if (this.status !== 'awaiting-approval' || this.pendingApproval === null || this.pendingApproval.id !== id) {
       return;
@@ -279,6 +314,9 @@ export class ScenarioPlayer {
     const step = this.pendingApproval;
     this.pendingApproval = null;
     this.handleApprovalResolution(step, approved);
+    if (!approved && step.onDeny) {
+      this.steps = [...this.steps.slice(0, this.stepIndex + 1), ...step.onDeny];
+    }
     this.stepIndex++;
     this.status = 'playing';
     this.commit();
@@ -351,13 +389,13 @@ export class ScenarioPlayer {
    * completes, after a marker is consumed, and after an approval or stage
    * action resolves. */
   private advance(): void {
-    if (this.stepIndex >= this.scenario.steps.length) {
+    if (this.stepIndex >= this.steps.length) {
       this.status = 'done';
       this.commit();
       return;
     }
 
-    const step = this.scenario.steps[this.stepIndex];
+    const step = this.steps[this.stepIndex];
 
     if (step.type === 'actMarker') {
       this.status = 'paused';
@@ -612,7 +650,14 @@ export class ScenarioPlayer {
     return message;
   }
 
+  /** Resets the working step queue from `scenario.steps` (fresh copy, never
+   * the same array reference — `scenario.steps` itself is NEVER mutated) as
+   * well as every other piece of derived state, so `reset()` restores a
+   * byte-identical pristine run even after a prior `onDeny` splice replaced
+   * the tail of `this.steps` (types.ts's `AwaitApprovalStep.onDeny` doc
+   * comment; player.test.ts's deny → reset → replay coverage). */
   private initializeState(): void {
+    this.steps = this.scenario.steps.slice();
     this.stepIndex = 0;
     this.remainingWaitMs = null;
     this.waitArmedAt = null;
