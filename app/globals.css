@@ -1,3 +1,4 @@
+@import "./fonts.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -58,6 +59,11 @@
  */
 :root,
 .dark {
+  /* Geist is vendored (public/fonts + app/fonts.css @font-face, exact
+   * unicode-range slices captured from next/font's own output) — the build
+   * must never depend on fonts.googleapis.com (demo-safety: no network). */
+  --font-geist-sans: "Geist", "Geist Fallback";
+  --font-geist-mono: "Geist Mono", "Geist Mono Fallback";
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --background: oklch(0.14 0.012 255);
   --foreground: oklch(0.96 0.005 250);

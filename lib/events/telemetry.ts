@@ -55,6 +55,7 @@ const ACTION_TOOL_NAMES = new Set([
   'updateContactInfo',
   'saveRules',
   'executeBatchRemoval',
+  'activateCard',
 ]);
 
 interface RunContext {
