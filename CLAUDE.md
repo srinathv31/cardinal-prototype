@@ -1,5 +1,12 @@
 # Cardinal — build notes for Claude
 
+> **DEMO PIVOT (branch `demo-aug4`, demo Aug 4–5 2026): `DEMO_THESIS.md` is the source of truth
+> for what we build now, and `DEMO_BUILD_PLAN.md` for how.** Three use cases only — AU policy via
+> ops chat (`/ops`), customer servicing chat (`/servicing`), card-activation policy. On this
+> branch those two documents outrank the briefs below wherever they conflict. Everything below
+> about v1 invariants, frozen dependencies, seed rules, and additive collections **still holds.**
+> The Sentinel stage is parked as spectacle; do not build on it.
+
 **`CARDINAL_BRIEF.md` is the source of truth for v1** (Command Center, Workflow Canvas, Agent Runs, Ask, Event Log) — every decision on those screens defers to it, and **v1 screens do not change.** Build only what the demo script (brief §3) needs. `AGENTS.md` carries current Next.js 16 conventions.
 
 **`CARDINAL_V3_AU_BRIEF.md` is the source of truth for the Sentinel stage (`/sentinel`) and the servicing chatbot (`/servicing`).** It **replaces** the v2 balance-transfer stage: `CARDINAL_V2_SENTINEL_BRIEF.md` is historical only — read it for context, never as a spec. `docs/v3-migration-map.md` records what v3 keeps, removes, and rewrites, and the v1 assertions that must stay green.
