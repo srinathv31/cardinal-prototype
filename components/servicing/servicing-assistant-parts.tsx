@@ -30,6 +30,17 @@ const CONTACT_CHANGE_COPY = {
   description: "We'll update the contact information on file for your account.",
 };
 
+// DEMO_THESIS.md Use case 3, customer side (gate G3) — "Activate this
+// card?" copy the task spec calls for. ApprovalCard's Approve/Decline
+// buttons are the shared component's own fixed labels (components/registry/
+// approval-card.tsx, outside this build's Wave 2 file ownership) — this
+// title/description pair is what actually carries the "Activate this card?"
+// framing on screen.
+const ACTIVATE_CARD_COPY = {
+  title: "Activate this card?",
+  description: "We'll run your card through the account's activation policy checks right now.",
+};
+
 /** Labels of any renderEvidence parts already rendered earlier in THIS
  * message — the same "evidence shown so far" idea
  * components/run-view/utils.ts's evidenceLabelsSoFar carries, scoped to one
@@ -124,6 +135,10 @@ function ServicingPart({
       return (
         <ContactChangePart part={part} evidence={evidence} onApprove={onApprove} onDecline={onDecline} />
       );
+    case "tool-activateCard":
+      return (
+        <ActivateCardPart part={part} evidence={evidence} onApprove={onApprove} onDecline={onDecline} />
+      );
     default:
       // The CardinalUIMessage union also carries every other agent's action
       // tools (payment-health/bt-lifecycle/au-growth) — unreachable on this
@@ -205,6 +220,110 @@ function ContactChangePart({
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>Couldn&apos;t update your contact information{part.errorText ? ` — ${part.errorText}` : "."}</span>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+type ActivateCardToolPart = Extract<AssistantPart, { type: "tool-activateCard" }>;
+
+/** Renders lib/agents/servicing/tools.ts's activateCard gate + result
+ * (DEMO_THESIS.md Use case 3, customer side). The output-available state
+ * branches on the tool's own `status` field — 'activated' vs 'blocked' —
+ * both real outcomes of the SAME server-side policy check
+ * (lib/sentinel/activate-card.ts), never a client-side guess; a card that
+ * arrived can still fail policy, and this renders that honestly rather than
+ * treating every completed activation as a success. */
+function ActivateCardPart({
+  part,
+  evidence,
+  onApprove,
+  onDecline,
+}: {
+  part: ActivateCardToolPart;
+  evidence: string[];
+  onApprove: (approvalId: string) => void;
+  onDecline: (approvalId: string) => void;
+}) {
+  switch (part.state) {
+    case "input-streaming":
+    case "input-available":
+      return (
+        <div className="flex w-fit items-center gap-2 rounded-full border border-dashed border-border bg-card/40 px-3 py-1.5 text-sm text-muted-foreground">
+          <Spinner className="size-3.5" />
+          Preparing your confirmation…
+        </div>
+      );
+    case "approval-requested":
+      return (
+        <ApprovalCard
+          approvalId={part.approval.id}
+          toolName="activateCard"
+          title={ACTIVATE_CARD_COPY.title}
+          description={ACTIVATE_CARD_COPY.description}
+          rationale={readStringField(part.input, "rationale")}
+          evidence={evidence}
+          onApprove={() => onApprove(part.approval.id)}
+          onDecline={() => onDecline(part.approval.id)}
+        />
+      );
+    case "approval-responded":
+      return (
+        <ApprovalCard
+          approvalId={part.approval.id}
+          toolName="activateCard"
+          title={ACTIVATE_CARD_COPY.title}
+          description={ACTIVATE_CARD_COPY.description}
+          rationale={readStringField(part.input, "rationale")}
+          evidence={evidence}
+          onApprove={() => {}}
+          onDecline={() => {}}
+          disabled
+          decision={part.approval.approved ? "approved" : "denied"}
+        />
+      );
+    case "output-available": {
+      const status = readStringField(part.output, "status");
+      if (status === "blocked") {
+        const ruleId = readStringField(part.output, "ruleId");
+        const finding = readStringField(part.output, "finding");
+        return (
+          <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium">
+                Your card arrived, but this account is currently failing a policy
+                {ruleId ? ` (${ruleId})` : ""}.
+              </p>
+              {finding ? <p className="mt-1 text-warning/90">{finding}</p> : null}
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div className="flex items-center gap-2.5 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
+          <CheckCircle2 className="size-4 shrink-0" />
+          <span className="font-medium">Card activated</span>
+          <span className="font-mono text-sm text-success">
+            {readStringField(part.output, "confirmationId") ?? ""}
+          </span>
+        </div>
+      );
+    }
+    case "output-denied":
+      return (
+        <div className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <CircleX className="size-4 shrink-0" />
+          Card was not activated.
+        </div>
+      );
+    case "output-error":
+      return (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>Couldn&apos;t activate your card{part.errorText ? ` — ${part.errorText}` : "."}</span>
         </div>
       );
     default:

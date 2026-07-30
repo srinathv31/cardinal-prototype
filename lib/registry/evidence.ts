@@ -86,6 +86,9 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
       // than by validation.
       z.object({ kind: z.literal('servicing-next-payment') }),
       z.object({ kind: z.literal('servicing-account-summary') }),
+      // Wave 2 Agent E addition (DEMO_THESIS.md Use case 2, "What is my next
+      // statement?") — same no-accountId shape as the two kinds above.
+      z.object({ kind: z.literal('servicing-next-statement') }),
     ]),
   }),
   z.object({

@@ -46,6 +46,7 @@ import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import { messageText, resolveErrorMessage } from "@/components/ask/utils";
 import type { CardinalUIMessage } from "@/lib/agents/registry";
+import { servicingRunId, type ServicingPersona } from "@/lib/agents/servicing/identity";
 import { ServicingAssistantParts } from "./servicing-assistant-parts";
 
 const SUGGESTED_QUESTIONS = [
@@ -55,8 +56,19 @@ const SUGGESTED_QUESTIONS = [
   "I need to update my phone number.",
 ];
 
-export function ServicingConversation({ onNewConversation }: { onNewConversation: () => void }) {
-  const [conversationId] = useState(() => `servicing-${crypto.randomUUID()}`);
+export function ServicingConversation({
+  persona,
+  onNewConversation,
+}: {
+  persona: ServicingPersona;
+  onNewConversation: () => void;
+}) {
+  // D6 persona pinning: encodes `persona` into the conversation/run id so
+  // the servicing agent (constructed server-side, per request, by
+  // lib/agents/registry.ts — a file this build keeps off limits) can
+  // recover it without a registry.ts change; see
+  // lib/agents/servicing/identity.ts's header for the full rationale.
+  const [conversationId] = useState(() => servicingRunId(persona, crypto.randomUUID()));
   const [input, setInput] = useState("");
 
   const transport = useMemo(

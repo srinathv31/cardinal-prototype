@@ -9,18 +9,45 @@
 // is deliberately unremarkable — an ordinary consumer servicing assistant —
 // because that ordinariness is the whole point of showing it before
 // /sentinel.
+//
+// Persona pinning (DEMO_BUILD_PLAN.md D6, Wave 2 Agent E work item 1):
+// `?persona=happy|blocked` (default "happy") is resolved SERVER-SIDE, here,
+// to the pinned cardholder (happy = Anand Patel, blocked = Marcus Webb —
+// the same two accounts app/api/cards/activate's POST body pins, via
+// lib/agents/servicing/identity.ts's shared persona→identity map). Nothing
+// downstream — ServicingSurface, ServicingConversation, or the servicing
+// agent itself — ever accepts an accountId; they only ever see this
+// already-resolved `persona` label, which is why it's safe to hand to a
+// client component as a plain string prop instead of a real identifier.
 
 import { PageHeader } from "@/components/shell/page-header";
 import { ServicingSurface } from "@/components/servicing/servicing-surface";
+import { parseServicingPersona } from "@/lib/agents/servicing/identity";
 
-export default function ServicingPage() {
+const PERSONA_LABEL: Record<"happy" | "blocked", string> = {
+  happy: "Anand Patel",
+  blocked: "Marcus Webb",
+};
+
+export default async function ServicingPage({
+  searchParams,
+}: {
+  // Next 16: searchParams is a Promise (app/runs/page.tsx's identical note).
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const { persona: personaParam } = await searchParams;
+  const persona = parseServicingPersona(personaParam);
+
   return (
     <div>
       <PageHeader
         title="Servicing"
-        description="Ask about your account — transactions, payments, balance, and contact info."
+        description="Ask about your account — transactions, payments, statements, balance, contact info, and card activation."
       />
-      <ServicingSurface />
+      <p className="-mt-4 mb-6 text-sm text-muted-foreground">
+        Signed in as {PERSONA_LABEL[persona]}
+      </p>
+      <ServicingSurface persona={persona} />
     </div>
   );
 }
