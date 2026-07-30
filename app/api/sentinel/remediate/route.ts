@@ -35,9 +35,17 @@ import { z } from 'zod';
 import { getAuExceptionFixture } from '@/lib/sentinel/exception-fixture';
 import { append } from '@/lib/events/store';
 
+// `agentId` was originally scoped to `sentinel*` — the only caller was the
+// Sentinel stage. Branch `demo-aug4` adds a second, legitimate caller: the ops
+// chat's `executeBatchRemoval` tool calls THIS handler in-process
+// (lib/agents/ops/resolvers.ts's `runBatchRemoval`) precisely so the chat's
+// confirmation id, counters, and `action.executed` audit entry are the ones
+// this route produces rather than a second copy that could drift from them.
+// The refinement below is widened by exactly that much — `ops` alongside
+// `sentinel*` — and stays a closed list, so an arbitrary agent id still 400s.
 const remediateRequestSchema = z.object({
   runId: z.string().min(1),
-  agentId: z.string().startsWith('sentinel'),
+  agentId: z.string().refine((id) => id.startsWith('sentinel') || id === 'ops'),
 });
 
 /** `rem-${fixture.reportId}` — a pure function of the fixture's own

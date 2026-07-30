@@ -16,15 +16,24 @@ import {
 import { createAUGrowthAgent, type AUGrowthUIMessage } from './au-growth/agent';
 import { createAskAgent, type AskUIMessage } from './ask/agent';
 import { createServicingAgent, type ServicingUIMessage } from './servicing/agent';
+import { createOpsAgent, type OpsUIMessage } from './ops/agent';
 
 export type CardinalUIMessage =
   | PaymentHealthUIMessage
   | BTLifecycleUIMessage
   | AUGrowthUIMessage
   | AskUIMessage
-  | ServicingUIMessage;
+  | ServicingUIMessage
+  | OpsUIMessage;
 
-export const AGENT_IDS = ['payment-health', 'bt-lifecycle', 'au-growth', 'ask', 'servicing'] as const;
+export const AGENT_IDS = [
+  'payment-health',
+  'bt-lifecycle',
+  'au-growth',
+  'ask',
+  'servicing',
+  'ops',
+] as const;
 export type CardinalAgentId = (typeof AGENT_IDS)[number];
 
 export const AGENT_NAMES: Record<CardinalAgentId, string> = {
@@ -33,6 +42,7 @@ export const AGENT_NAMES: Record<CardinalAgentId, string> = {
   'au-growth': 'AU Growth',
   ask: 'Ask',
   servicing: 'Servicing',
+  ops: 'Ops',
 };
 
 export function isCardinalAgentId(value: string): value is CardinalAgentId {
@@ -85,6 +95,12 @@ export async function createAgentRunStreamResponse(options: {
       const uiMessages = await validateUIMessages<ServicingUIMessage>({ messages });
       onValidated(uiMessages);
       const agent = createServicingAgent({ runId });
+      return createAgentUIStreamResponse({ agent, uiMessages });
+    }
+    case 'ops': {
+      const uiMessages = await validateUIMessages<OpsUIMessage>({ messages });
+      onValidated(uiMessages);
+      const agent = createOpsAgent({ runId });
       return createAgentUIStreamResponse({ agent, uiMessages });
     }
   }

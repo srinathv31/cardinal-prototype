@@ -38,11 +38,23 @@ import { append } from './store';
  * route (`approval.granted`/`approval.denied`, `actor: 'human'`), so the
  * omission would not have lost the gate — but it would have hidden the
  * WRITE from anyone scanning the Event Log for `action.executed`, which is
- * precisely the reviewer this distinction exists for. */
+ * precisely the reviewer this distinction exists for.
+ *
+ * `saveRules` and `executeBatchRemoval` (branch `demo-aug4`,
+ * lib/agents/ops/tools.ts) are the ops chat's two gated actions — DEMO_THESIS.md
+ * use case 1's G1 (adopting rules into the rule store) and G2 (the batch
+ * authorized-user removal). Both are genuine writes: G1 mutates
+ * lib/rules/store.ts, and G2 executes the remediation endpoint's mock batch and
+ * mints its confirmation id. Their human approval decisions are logged
+ * independently by the stream route (`approval.granted`/`approval.denied`,
+ * `actor: 'human'`); these entries are the agent-side record that the approved
+ * action actually ran. */
 const ACTION_TOOL_NAMES = new Set([
   'proposeDueDateChange',
   'sendOutreachDraft',
   'updateContactInfo',
+  'saveRules',
+  'executeBatchRemoval',
 ]);
 
 interface RunContext {

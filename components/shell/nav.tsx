@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  ClipboardCheck,
   Headset,
   LayoutDashboard,
   MessageSquare,
@@ -19,6 +20,8 @@ const links = [
   { href: "/workflows", label: "Workflow Canvas", icon: Workflow },
   { href: "/runs", label: "Agent Runs", icon: Activity },
   { href: "/ask", label: "Ask", icon: MessageSquare },
+  // DEMO_THESIS.md use case 1's surface (branch `demo-aug4`) — the ops chat.
+  { href: "/ops", label: "Ops", icon: ClipboardCheck },
   { href: "/servicing", label: "Servicing", icon: Headset },
   { href: "/sentinel", label: "Sentinel", icon: Shield },
   { href: "/events", label: "Event Log", icon: ScrollText },
