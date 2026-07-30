@@ -95,3 +95,29 @@ export interface StreamEvent {
   summary: string;
   timestamp: string;
 }
+
+/**
+ * v3 "card-activation policy" addition (DEMO_THESIS.md Use case 3;
+ * DEMO_BUILD_PLAN.md "Card-activation domain") — the servicing channel a
+ * card's issuance/activation was recorded against. A closed set, same
+ * spirit as `Payment.channel`.
+ */
+export type CardActivationChannel = 'ONLINE' | 'PHONE' | 'MOBILE_APP' | 'BRANCH';
+
+/**
+ * v3 "card-activation policy" addition — one card issued against one
+ * account. `issuedDate`/`activatedDate` are day-offsets from the demo
+ * anchor, same as every other seed date (CLAUDE.md: "Seed dates are
+ * day-offsets from the demo anchor"). `activatedDate` is absent until the
+ * card is activated — CA-R2 (lib/sentinel/card-activation-policy.ts) reads
+ * that absence as "not yet activated," not as missing data. Additive only:
+ * lives on `SeedDb.cardActivations` (lib/soe/seed/index.ts), never merged
+ * into `accounts`/`parties`/`accountPartyRoles`/`payments`.
+ */
+export interface CardActivation {
+  accountId: string;
+  cardId: string;
+  issuedDate: string; // ISO date
+  activatedDate?: string; // ISO date
+  channel: CardActivationChannel;
+}

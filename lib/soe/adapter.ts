@@ -8,6 +8,7 @@ import type {
   Account,
   AccountPartyRole,
   BalanceTransferEvent,
+  CardActivation,
   Party,
   Payment,
   StreamEvent,
@@ -178,6 +179,54 @@ export async function getAuScanPortfolio(): Promise<AuPortfolioSnapshot> {
     parties: [...collectionParties, ...v1Parties],
     roles: [...collectionRoles, ...v1Roles],
     payments: [...collectionPayments, ...v1Payments],
+  };
+}
+
+// v3 "card-activation policy" additions (DEMO_THESIS.md Use case 3;
+// DEMO_BUILD_PLAN.md "Card-activation domain") — new exports only; nothing
+// above changes. Follows getAuPortfolio / getAuScanPortfolio's precedent
+// immediately above: one raw getter, one pre-merged "scan" getter shaped
+// exactly for its evaluator (lib/sentinel/ca-exceptions.ts).
+
+/** The raw additive card-activation collection — 214 cards. */
+export async function getCardActivations(): Promise<CardActivation[]> {
+  return [...getDb().cardActivations];
+}
+
+export interface CardActivationScan {
+  cardActivations: CardActivation[];
+  /** Every payment for every account referenced by `cardActivations`,
+   * merged from BOTH the AU portfolio (the 212 "regular" cards' accounts)
+   * and v1's cast (Marcus/Patel, the two special cards' accounts) — the
+   * same merge shape getAuScanPortfolio uses above, filtered down to only
+   * the accounts this scan actually needs. lib/sentinel/ca-exceptions.ts
+   * filters this by accountId itself, so passing the full merged set for
+   * every account in `cardActivations` is exactly what it expects. */
+  payments: Payment[];
+  /** ISO date (YYYY-MM-DD) — "today," the same demo anchor every
+   * `issuedDate`/`activatedDate` in `cardActivations` was generated from.
+   * CA-R2's unactivated arm (ca-exceptions.ts) clocks elapsed days against
+   * this, never against wall-clock time. */
+  asOf: string;
+}
+
+/** The card-activation scan set: every card in the collection, plus the
+ *  payment history needed to evaluate CA-R1 (past-due at activation) for
+ *  whichever of them are activated. Unlike getAuScanPortfolio, there is no
+ *  "denominator" filtering step here — cardActivations already IS the scan
+ *  set (every card is issued, so every card is in scope), so this getter's
+ *  only job is attaching the payment data the evaluator needs. */
+export async function getCardActivationScan(): Promise<CardActivationScan> {
+  const db = getDb();
+  const accountIds = new Set(db.cardActivations.map((c) => c.accountId));
+  const payments = [
+    ...db.auPortfolio.payments.filter((p) => accountIds.has(p.accountId)),
+    ...db.payments.filter((p) => accountIds.has(p.accountId)),
+  ];
+  return {
+    cardActivations: [...db.cardActivations],
+    payments,
+    asOf: getAnchor().toISOString().slice(0, 10),
   };
 }
 

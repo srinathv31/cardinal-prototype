@@ -5,6 +5,7 @@
 
 import { buildAuPortfolio, type AuPortfolio } from './au-portfolio';
 import { buildBackground } from './background';
+import { buildCardActivations } from './card-activation';
 import { buildElena } from './elena';
 import { buildMarcus } from './marcus';
 import { buildPatel } from './patel';
@@ -12,6 +13,7 @@ import type {
   Account,
   AccountPartyRole,
   BalanceTransferEvent,
+  CardActivation,
   Party,
   Payment,
   StreamEvent,
@@ -33,6 +35,11 @@ export interface SeedDb {
    * pinned tests stay frozen (docs/v3-migration-map.md §3). Consumed only
    * through lib/soe/adapter.ts's getAuPortfolio / getAuScanPortfolio. */
   auPortfolio: AuPortfolio;
+  /** v3 "card-activation policy" addition (DEMO_THESIS.md Use case 3;
+   * DEMO_BUILD_PLAN.md "Card-activation domain") — an additive collection,
+   * NEVER merged into the arrays above. Consumed only through
+   * lib/soe/adapter.ts's getCardActivations / getCardActivationScan. */
+  cardActivations: CardActivation[];
 }
 
 export function buildSeedDb(anchor: Date): SeedDb {
@@ -41,6 +48,7 @@ export function buildSeedDb(anchor: Date): SeedDb {
   const patel = buildPatel(anchor);
   const background = buildBackground(anchor);
   const auPortfolio = buildAuPortfolio(anchor);
+  const cardActivations = buildCardActivations(anchor, auPortfolio);
 
   return {
     parties: [
@@ -78,5 +86,6 @@ export function buildSeedDb(anchor: Date): SeedDb {
       ...background.streamEvents,
     ],
     auPortfolio,
+    cardActivations,
   };
 }
