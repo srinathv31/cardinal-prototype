@@ -48,13 +48,20 @@ import { append } from './store';
  * mints its confirmation id. Their human approval decisions are logged
  * independently by the stream route (`approval.granted`/`approval.denied`,
  * `actor: 'human'`); these entries are the agent-side record that the approved
- * action actually ran. */
+ * action actually ran.
+ *
+ * `queueActivationOutreach` is the card-activation policy's Gate 2 — the ops
+ * chat's other write, and DEMO_THESIS.md use case 3's "human-in-the-loop takes
+ * some action on the result." Mocked downstream like the batch removal, and
+ * logged here for the same reason: what a reviewer scanning for
+ * `action.executed` must see is that an approved batch actually ran. */
 const ACTION_TOOL_NAMES = new Set([
   'proposeDueDateChange',
   'sendOutreachDraft',
   'updateContactInfo',
   'saveRules',
   'executeBatchRemoval',
+  'queueActivationOutreach',
   'activateCard',
 ]);
 

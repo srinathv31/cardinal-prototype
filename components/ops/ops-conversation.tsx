@@ -50,13 +50,25 @@ import { OpsAssistantParts } from "./ops-assistant-parts";
 const SUGGESTED_REQUESTS = [
   "Give me the accounts that fail on these authorized-user policies.",
   "Which relationships are out of compliance?",
+  "Run the card-activation policy against the book.",
 ];
+
+/** Which policy a picked file names, by the one keyword the server uses for
+ * the same decision (lib/agents/ops/resolvers.ts's
+ * `CARD_ACTIVATION_DOCUMENT_HINT`). This is copy for the USER'S OWN turn, not
+ * a routing decision: the server re-derives the document from the same file
+ * name independently, and would parse the card-activation fixture even if this
+ * sentence said nothing about it. */
+const CARD_ACTIVATION_FILENAME = /activation/i;
 
 /** The user turn an upload produces. The file name is the user's own — read
  * from the picker, never invented — and the sentence after it is what tells
  * the agent this is a policy document to parse. */
 function uploadMessage(filename: string): string {
-  return `Uploaded ${filename} — please parse this authorized-user policy document.`;
+  const policy = CARD_ACTIVATION_FILENAME.test(filename)
+    ? "card-activation"
+    : "authorized-user";
+  return `Uploaded ${filename} — please parse this ${policy} policy document.`;
 }
 
 export function OpsConversation({ onNewConversation }: { onNewConversation: () => void }) {

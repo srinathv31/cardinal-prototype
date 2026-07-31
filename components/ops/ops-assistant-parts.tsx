@@ -32,18 +32,27 @@ import type { CardinalUIMessage } from "@/lib/agents/registry";
 
 type AssistantPart = CardinalUIMessage["parts"][number];
 
-/** Copy for the two gates. Static presentation strings — the figures live in
- * the model's `rationale`, which the card renders verbatim. */
+/** Copy for the three gates. Static presentation strings — the figures live in
+ * the model's `rationale`, which the card renders verbatim. `saveRules` serves
+ * both policies, so its description names neither: which rule store the
+ * approval writes to is decided server-side by the document that was uploaded
+ * (lib/agents/ops/resolvers.ts), and a card that guessed would eventually
+ * guess wrong on stage. */
 const GATE_COPY = {
   saveRules: {
     title: "Adopt these rules",
     description:
-      "Approving stores these rules in the authorized-user rule store, where every sweep evaluates against them.",
+      "Approving stores these rules in the policy rule store, where every sweep evaluates against them.",
   },
   executeBatchRemoval: {
     title: "Approve batch removal",
     description:
       "Approving kicks off removal of the flagged authorized-user relationships and notifies each primary cardholder.",
+  },
+  queueActivationOutreach: {
+    title: "Approve activation outreach",
+    description:
+      "Approving queues outreach to the primary cardholder on every account with a card-activation exception.",
   },
 } as const;
 
@@ -305,6 +314,20 @@ function OpsPart({
           detailKey="confirmationId"
           declinedCopy="Nothing was removed."
           failedLabel="Couldn't start the batch removal"
+          onApprove={onApprove}
+          onDecline={onDecline}
+        />
+      );
+    case "tool-queueActivationOutreach":
+      return (
+        <GatePart
+          part={part}
+          gate="queueActivationOutreach"
+          preparingLabel="Preparing the outreach batch for your approval…"
+          executedHeadline="Queued for outreach"
+          detailKey="confirmationId"
+          declinedCopy="No outreach was queued."
+          failedLabel="Couldn't queue the activation outreach"
           onApprove={onApprove}
           onDecline={onDecline}
         />

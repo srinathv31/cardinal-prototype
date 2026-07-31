@@ -39,6 +39,32 @@ const AU_RULES: RuleInput[] = [
   },
 ];
 
+/** The card-activation rules as a human's Gate-1 approval stores them
+ *  (lib/sentinel/card-activation-policy.ts's CA-R1/CA-R2, flattened by
+ *  lib/agents/ops/resolvers.ts). Written out here rather than imported for the
+ *  same reason AU_RULES above is: this file tests the ENDPOINT, and an endpoint
+ *  test that fetched its own inputs from the agent surface would stop being an
+ *  independent check of what an external partner gets. */
+const CA_RULES: RuleInput[] = [
+  {
+    id: 'CA-R1',
+    title: 'CA-R1 — Activation While Past-Due',
+    requirement: 'A card may not be activated while the account is past-due.',
+    citation: 'Card Activation Servicing Policy · §Activation While Past-Due',
+    machine:
+      'CA-R1 · card-activations, payments · at activation attempt · payment-derived past-due state',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+  {
+    id: 'CA-R2',
+    title: 'CA-R2 — 45-Day Activation Window',
+    requirement: 'Cards must be activated within 45 days of issuance.',
+    citation: 'Card Activation Servicing Policy · §Activation Window',
+    machine: 'CA-R2 · card-activations · nightly sweep · issuedDate/activatedDate elapsed window',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+];
+
 function violationsRequest(search: string): Request {
   return new Request(`http://localhost/api/violations${search}`);
 }
@@ -158,6 +184,68 @@ describe('GET /api/violations', () => {
     const second = await (await GET(violationsRequest('?policy=authorized-user'))).json();
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   });
+
+  // ————— card-activation, through the SAME route, unchanged ——————————
+  //
+  // DEMO_THESIS.md's endpoint checklist rows 3 and 4 are one route: registering
+  // an evaluator (lib/rules/evaluators.ts) is the whole of what wiring a second
+  // policy takes, and nothing in route.ts knows either policy's name.
+
+  it('with both CA rules stored: 214 scanned · 41 exceptions · 41 accounts · 12/29 by rule', async () => {
+    saveRules('card-activation', CA_RULES);
+    const response = await GET(violationsRequest('?policy=card-activation'));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+
+    expect(payload.policyId).toBe('card-activation');
+    expect(payload.summary).toEqual({ scanned: 214, accountsAffected: 41, exceptions: 41 });
+    expect(payload.rows).toHaveLength(41);
+    expect(payload.byRule).toEqual([
+      { ruleId: 'CA-R1', title: 'CA-R1 — Activation While Past-Due', count: 12 },
+      { ruleId: 'CA-R2', title: 'CA-R2 — 45-Day Activation Window', count: 29 },
+    ]);
+    expect(new Set(payload.rows.map((r: { accountId: string }) => r.accountId)).size).toBe(41);
+  });
+
+  it('narrows card-activation to the stored rules — CA-R2 alone reports 29', async () => {
+    saveRules('card-activation', [CA_RULES[1]]);
+    const payload = await (await GET(violationsRequest('?policy=card-activation'))).json();
+
+    expect(payload.summary).toEqual({ scanned: 214, accountsAffected: 29, exceptions: 29 });
+    expect(payload.rows.every((r: { ruleId: string }) => r.ruleId === 'CA-R2')).toBe(true);
+    expect(payload.byRule).toEqual([
+      { ruleId: 'CA-R2', title: 'CA-R2 — 45-Day Activation Window', count: 29 },
+    ]);
+  });
+
+  it('keeps the two policies\' stores independent', async () => {
+    saveRules('authorized-user', AU_RULES);
+    saveRules('card-activation', CA_RULES);
+
+    const au = await (await GET(violationsRequest('?policy=authorized-user'))).json();
+    const ca = await (await GET(violationsRequest('?policy=card-activation'))).json();
+
+    expect(au.summary).toEqual({ scanned: 962, accountsAffected: 74, exceptions: 87 });
+    expect(ca.summary).toEqual({ scanned: 214, accountsAffected: 41, exceptions: 41 });
+    expect(au.rows.every((r: { ruleId: string }) => r.ruleId.startsWith('R'))).toBe(true);
+    expect(ca.rows.every((r: { ruleId: string }) => r.ruleId.startsWith('CA-R'))).toBe(true);
+  });
+
+  it('card-activation rows carry drill-down detail preformatted server-side', async () => {
+    saveRules('card-activation', CA_RULES);
+    const payload = await (await GET(violationsRequest('?policy=card-activation'))).json();
+
+    for (const row of payload.rows) {
+      expect(row.holder.length).toBeGreaterThan(0);
+      expect(row.finding.length).toBeGreaterThan(0);
+      expect(row.detail.length).toBeGreaterThan(0);
+      for (const fact of row.detail) {
+        expect(typeof fact.label).toBe('string');
+        expect(typeof fact.value).toBe('string');
+        expect(fact.value).not.toMatch(/^\d{4}-\d{2}-\d{2}(T|$)/);
+      }
+    }
+  });
 });
 
 describe('GET /api/violations @ the second demo anchor', () => {
@@ -177,5 +265,12 @@ describe('GET /api/violations @ the second demo anchor', () => {
     const payload = await (await GET(violationsRequest('?policy=authorized-user'))).json();
     expect(payload.summary).toEqual({ scanned: 962, accountsAffected: 74, exceptions: 87 });
     expect(payload.byRule.map((r: { count: number }) => r.count)).toEqual([61, 19, 7]);
+  });
+
+  it('holds the same golden card-activation figures on the rehearsal anchor', async () => {
+    saveRules('card-activation', CA_RULES);
+    const payload = await (await GET(violationsRequest('?policy=card-activation'))).json();
+    expect(payload.summary).toEqual({ scanned: 214, accountsAffected: 41, exceptions: 41 });
+    expect(payload.byRule.map((r: { count: number }) => r.count)).toEqual([12, 29]);
   });
 });

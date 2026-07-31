@@ -17,8 +17,10 @@
 //   rule-engineer   saveRules             (drafts them into the store)
 //   data-collector  queryViolations       (sweeps the book)
 //   critic          generateReport        (writes up what happened)
-//   approval-gate   any pending approval  — driven by `approvalPending`, which
-//                   the graph component already overrides on its own
+//   approval-gate   executeBatchRemoval / queueActivationOutreach — whichever
+//                   action the swept policy calls for; also lit by any pending
+//                   approval via `approvalPending`, which the graph component
+//                   already overrides on its own
 //
 // A node is `working` from the moment its tool call starts streaming until its
 // output lands, then `done` for the rest of the conversation. Nothing here
@@ -36,6 +38,7 @@ const NODE_BY_TOOL: Record<string, SentinelNodeId> = {
   "tool-saveRules": "rule-engineer",
   "tool-queryViolations": "data-collector",
   "tool-executeBatchRemoval": "approval-gate",
+  "tool-queueActivationOutreach": "approval-gate",
   "tool-generateReport": "critic",
 };
 

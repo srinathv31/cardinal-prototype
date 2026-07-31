@@ -1,12 +1,16 @@
-// The authorized-user evaluator and the registry it registers into. Runs at
-// both demo-date anchors, following lib/sentinel/exception-fixture.test.ts's
+// Both policy evaluators and the registry they register into. Runs at both
+// demo-date anchors, following lib/sentinel/exception-fixture.test.ts's
 // convention — DEMO_ANCHOR_DATE pins the adapter's cached SeedDb, and every
 // figure asserted below has to fall out of that data rather than out of a
 // literal in the evaluator.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { getCardActivationScan } from '@/lib/soe';
+import { evaluateCardActivationPolicy as scanCardActivations } from '@/lib/sentinel/ca-exceptions';
+import { cardActivationPolicyRules } from '@/lib/sentinel/card-activation-policy';
 import {
   evaluateAuthorizedUserPolicy,
+  evaluateCardActivationPolicy,
   getEvaluator,
   listRegisteredPolicies,
   registerEvaluator,
@@ -83,10 +87,123 @@ describe.each(ANCHORS)('authorized-user evaluator @ anchor %s', (anchorIso) => {
   });
 });
 
+describe.each(ANCHORS)('card-activation evaluator @ anchor %s', (anchorIso) => {
+  beforeEach(() => {
+    process.env.DEMO_ANCHOR_DATE = anchorIso;
+  });
+  afterEach(() => {
+    delete process.env.DEMO_ANCHOR_DATE;
+  });
+
+  it('reports the golden CA figures — 214 cards scanned, 41 exceptions across 41 accounts', async () => {
+    const payload = await evaluateCardActivationPolicy();
+    expect(payload.policyId).toBe('card-activation');
+    expect(payload.summary).toEqual({
+      scanned: 214,
+      accountsAffected: 41,
+      exceptions: 41,
+    });
+    expect(payload.rows).toHaveLength(41);
+    // One card per account and no card reported twice, so the exception count
+    // and the account count are the same number here — unlike the AU policy.
+    expect(new Set(payload.rows.map((row) => row.accountId)).size).toBe(41);
+  });
+
+  it('splits 12/29 by rule, in CA-R1/CA-R2 order', async () => {
+    const payload = await evaluateCardActivationPolicy();
+    expect(payload.byRule.map((r) => r.ruleId)).toEqual(['CA-R1', 'CA-R2']);
+    expect(payload.byRule.map((r) => r.count)).toEqual([12, 29]);
+    expect(payload.byRule.map((r) => r.title)).toEqual(
+      cardActivationPolicyRules.map((rule) => rule.title),
+    );
+    for (const rule of payload.byRule) {
+      expect(payload.rows.filter((row) => row.ruleId === rule.ruleId)).toHaveLength(rule.count);
+    }
+  });
+
+  it('carries the domain evaluator\'s own exceptions through unchanged', async () => {
+    // The adapter shape the payload is built from, re-scanned independently:
+    // the ViolationsPayload adapter must not edit a finding or invent a row.
+    const direct = scanCardActivations(await getCardActivationScan());
+    const payload = await evaluateCardActivationPolicy();
+
+    expect(payload.summary.scanned).toBe(direct.cardsScanned);
+    expect(payload.rows.map((row) => `${row.accountId}·${row.ruleId}·${row.finding}`)).toEqual(
+      direct.exceptions.map((e) => `${e.accountId}·${e.ruleId}·${e.finding}`),
+    );
+  });
+
+  it('every row carries a holder, a finding sentence, and preformatted detail facts', async () => {
+    const payload = await evaluateCardActivationPolicy();
+    for (const row of payload.rows) {
+      expect(row.holder.length).toBeGreaterThan(0);
+      expect(row.ruleTitle).toMatch(/^CA-R[12] — /);
+      expect(row.finding.length).toBeGreaterThan(0);
+      for (const fact of row.detail) {
+        expect(fact.label.length).toBeGreaterThan(0);
+        expect(fact.value.length).toBeGreaterThan(0);
+        // Nothing raw for the client to format (CLAUDE.md 5a/5b).
+        expect(fact.value).not.toMatch(/^\d{4}-\d{2}-\d{2}(T|$)/);
+      }
+    }
+  });
+
+  it('drill-down detail names the card, both dates, the rule and its citation', async () => {
+    const payload = await evaluateCardActivationPolicy();
+    const labels = payload.rows[0].detail.map((f) => f.label);
+    expect(labels).toEqual([
+      'Card',
+      'Primary cardholder',
+      'Account ID',
+      'Card issued',
+      'Card activated',
+      'Rule',
+      'Requirement',
+      'Policy citation',
+    ]);
+
+    const citation = payload.rows[0].detail.find((f) => f.label === 'Policy citation');
+    expect(citation?.value).toContain('Card Activation Servicing Policy');
+
+    // An unactivated card's "Card activated" fact is an em dash, never blank
+    // and never a fabricated date.
+    const unactivated = payload.rows.find((row) => row.ruleId === 'CA-R2');
+    expect(unactivated?.detail.find((f) => f.label === 'Card activated')?.value).toBe('—');
+    // …and an activated one carries a formatted date.
+    const activated = payload.rows.find((row) => row.ruleId === 'CA-R1');
+    expect(activated?.detail.find((f) => f.label === 'Card activated')?.value).toMatch(
+      /^[A-Z][a-z]{2} \d{1,2}, \d{4}$/,
+    );
+  });
+
+  it('quotes each rule\'s requirement verbatim from the policy fixture', async () => {
+    const payload = await evaluateCardActivationPolicy();
+    const requirementByRuleId = new Map<string, string>(
+      cardActivationPolicyRules.map((rule) => [rule.ruleId, rule.plainEnglish]),
+    );
+    for (const row of payload.rows) {
+      expect(row.detail.find((f) => f.label === 'Requirement')?.value).toBe(
+        requirementByRuleId.get(row.ruleId),
+      );
+    }
+  });
+
+  it('is deterministic — two evaluations return byte-identical payloads', async () => {
+    const first = await evaluateCardActivationPolicy();
+    const second = await evaluateCardActivationPolicy();
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+});
+
 describe('evaluator registry', () => {
   it('registers authorized-user at module load', () => {
     expect(listRegisteredPolicies()).toContain('authorized-user');
     expect(getEvaluator('authorized-user')).toBe(evaluateAuthorizedUserPolicy);
+  });
+
+  it('registers card-activation at module load', () => {
+    expect(listRegisteredPolicies()).toContain('card-activation');
+    expect(getEvaluator('card-activation')).toBe(evaluateCardActivationPolicy);
   });
 
   it('registerEvaluator adds a policy without this module knowing about it', () => {

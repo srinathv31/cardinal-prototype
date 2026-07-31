@@ -28,15 +28,24 @@ import { getRules, resetRules } from '@/lib/rules/store';
 import { queryViolations } from '@/lib/rules/query';
 import { getAuExceptionFixture } from '@/lib/sentinel/exception-fixture';
 import { policyDocument, policyObligationGap, policyRules } from '@/lib/sentinel/policy';
+import {
+  cardActivationPolicyDocument,
+  cardActivationPolicyRules,
+} from '@/lib/sentinel/card-activation-policy';
 import { sentinelRenderInstructionSchema } from '@/lib/sentinel/registry';
 import { POST as remediatePost } from '@/app/api/sentinel/remediate/route';
 import {
+  activationOutreachConfirmationId,
+  activePolicyId,
   buildAuditReport,
   candidateRules,
   OPS_AGENT_ID,
   OPS_POLICY_ID,
   parsePolicyDocument,
+  planActivationOutreach,
+  policyScanUnit,
   resolveViolations,
+  runActivationOutreach,
   runBatchRemoval,
   saveApprovedRules,
   storedRequirement,
@@ -336,6 +345,210 @@ describe.each(ANCHORS)('ops resolvers @ anchor %s', (anchorIso) => {
       const first = await buildAuditReport();
       const second = await buildAuditReport();
       expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // DEMO_THESIS.md use case 3, ops side — the card-activation policy
+  // -------------------------------------------------------------------------
+
+  describe('the card-activation policy', () => {
+    const CA_RULE_IDS = cardActivationPolicyRules.map((rule) => rule.ruleId);
+
+    it('parses the card-activation document when the uploaded file names it', () => {
+      const parsed = parsePolicyDocument('Card-Activation-Policy-2026.docx');
+      expect(parsed.policyId).toBe('card-activation');
+      expect(parsed.documentId).toBe(cardActivationPolicyDocument.id);
+      expect(parsed.documentTitle).toBe(cardActivationPolicyDocument.title);
+      expect(parsed.ruleIds).toEqual(CA_RULE_IDS);
+      // Every obligation this document states is drafted — no gap row, and
+      // none invented for symmetry.
+      expect(parsed.dataGapIds).toEqual([]);
+    });
+
+    it('falls back to the authorized-user document for any other file name', () => {
+      expect(parsePolicyDocument().policyId).toBe(OPS_POLICY_ID);
+      expect(parsePolicyDocument('AU-Eligibility-Policy-2026.docx').policyId).toBe(OPS_POLICY_ID);
+      expect(parsePolicyDocument('policy.pdf').policyId).toBe(OPS_POLICY_ID);
+      expect(parsePolicyDocument('AU-Eligibility-Policy-2026.docx').documentId).toBe(
+        policyDocument.id,
+      );
+    });
+
+    it('renders a schema-valid RuleDiff quoting the card-activation document verbatim', () => {
+      const parsed = parsePolicyDocument('Card-Activation-Policy-2026.docx');
+      expect(() => sentinelRenderInstructionSchema.parse(parsed.render)).not.toThrow();
+      if (parsed.render.component !== 'RuleDiff') throw new Error('unreachable');
+
+      const rows = parsed.render.props.rules;
+      expect(rows).toHaveLength(cardActivationPolicyRules.length);
+      expect(parsed.render.props.status).toBe('proposed');
+      expect(rows.every((row) => row.evaluability === 'evaluable')).toBe(true);
+
+      for (const rule of cardActivationPolicyRules) {
+        const row = rows.find((r) => r.ruleId === rule.ruleId);
+        expect(row?.plainEnglish).toBe(rule.plainEnglish);
+        const section = cardActivationPolicyDocument.sections.find(
+          (s) => s.id === rule.excerpt.sectionId,
+        );
+        expect(row?.excerpt.sectionHeading).toBe(section?.heading);
+        expect(section?.body).toContain(row?.excerpt.quote);
+      }
+    });
+
+    it('derives the policy from the approved rule ids, never from a parameter', () => {
+      const result = saveApprovedRules(CA_RULE_IDS);
+      expect(result).toMatchObject({ status: 'saved', policyId: 'card-activation', saved: 2 });
+
+      const stored = getRules('card-activation');
+      expect(stored.map((r) => r.id)).toEqual(CA_RULE_IDS);
+      expect(stored.every((r) => r.policyId === 'card-activation')).toBe(true);
+      // …and every stored field came off the card-activation fixture.
+      for (const rule of cardActivationPolicyRules) {
+        const row = stored.find((r) => r.id === rule.ruleId);
+        const section = cardActivationPolicyDocument.sections.find(
+          (s) => s.id === rule.excerpt.sectionId,
+        );
+        expect(row?.title).toBe(rule.title);
+        expect(row?.requirement).toBe(rule.plainEnglish);
+        expect(row?.citation).toBe(`${cardActivationPolicyDocument.title} · §${section?.heading}`);
+      }
+      // Approving CA rules leaves the AU store untouched.
+      expect(getRules(OPS_POLICY_ID)).toHaveLength(0);
+    });
+
+    it('makes the approved policy the active one, and reset returns it to the default', () => {
+      expect(activePolicyId()).toBe(OPS_POLICY_ID);
+      saveApprovedRules(CA_RULE_IDS);
+      expect(activePolicyId()).toBe('card-activation');
+      // A later AU approval hands it back — the human's last approval wins.
+      saveApprovedRules(['R1', 'R2', 'R3']);
+      expect(activePolicyId()).toBe(OPS_POLICY_ID);
+      resetRules();
+      expect(activePolicyId()).toBe(OPS_POLICY_ID);
+    });
+
+    it('sweeps the active policy — 214 scanned · 41 exceptions · 12/29 by rule', async () => {
+      saveApprovedRules(CA_RULE_IDS);
+
+      const direct = await queryViolations('card-activation');
+      if (direct.status !== 'ok') throw new Error('unreachable');
+      const result = await resolveViolations();
+      if (result.status !== 'ok') throw new Error('unreachable');
+
+      expect(result.policyId).toBe('card-activation');
+      expect(result.scanned).toBe(direct.payload.summary.scanned);
+      expect(result.byRule).toEqual(direct.payload.byRule);
+
+      expect(result.scanned).toBe(214);
+      expect(result.accountsAffected).toBe(41);
+      expect(result.exceptions).toBe(41);
+      expect(result.byRule.map((r) => r.count)).toEqual([12, 29]);
+    });
+
+    it('renders a dashboard whose table samples both rules proportionally', async () => {
+      saveApprovedRules(CA_RULE_IDS);
+      const result = await resolveViolations();
+      if (result.status !== 'ok') throw new Error('unreachable');
+
+      expect(() => sentinelRenderInstructionSchema.parse(result.render)).not.toThrow();
+      if (result.render.component !== 'ViolationsDashboard') throw new Error('unreachable');
+      const props = result.render.props;
+
+      expect(props.policyId).toBe('card-activation');
+      expect(props.summary).toEqual({ scanned: 214, accountsAffected: 41, exceptions: 41 });
+      expect(props.rows).toHaveLength(12);
+      expect(new Set(props.rows.map((r) => r.ruleId))).toEqual(new Set(['CA-R1', 'CA-R2']));
+      // CA-R2 is the larger group and gets the larger share of the table.
+      const mix = props.rows.map((r) => r.ruleId);
+      expect(mix.filter((id) => id === 'CA-R2').length).toBeGreaterThan(
+        mix.filter((id) => id === 'CA-R1').length,
+      );
+
+      const direct = await queryViolations('card-activation');
+      if (direct.status !== 'ok') throw new Error('unreachable');
+      const known = new Set(direct.payload.rows.map((r) => `${r.accountId}·${r.ruleId}`));
+      for (const row of props.rows) {
+        expect(known.has(`${row.accountId}·${row.ruleId}`)).toBe(true);
+        for (const fact of row.detail) {
+          expect(fact.value).not.toMatch(/^\d{4}-\d{2}-\d{2}(T|$)/);
+        }
+      }
+    });
+
+    it('says so plainly when no card-activation rules are configured', async () => {
+      // The CA document was uploaded, but Gate 1 has not run — the active
+      // policy is still the default, and the answer names it.
+      const result = await resolveViolations();
+      expect(result.status).toBe('no-rules');
+      if (result.status !== 'no-rules') throw new Error('unreachable');
+      expect(result.message.toLowerCase()).toContain('no authorized-user rules');
+    });
+
+    it('narrows to the rules a human approved — CA-R2 alone reports 29', async () => {
+      saveApprovedRules(['CA-R2']);
+      const result = await resolveViolations();
+      if (result.status !== 'ok') throw new Error('unreachable');
+      expect(result.exceptions).toBe(29);
+      expect(result.byRule.map((r) => r.ruleId)).toEqual(['CA-R2']);
+      expect(storedRequirement('CA-R2')).toBe(cardActivationPolicyRules[1].plainEnglish);
+    });
+
+    it('names the population each policy sweeps', () => {
+      expect(policyScanUnit(OPS_POLICY_ID)).toBe('authorized-user relationships');
+      expect(policyScanUnit('card-activation')).toBe('issued cards');
+    });
+
+    describe('queueActivationOutreach', () => {
+      it('queues one message per flagged account, from the evaluator\'s own count', async () => {
+        saveApprovedRules(CA_RULE_IDS);
+        const receipt = await runActivationOutreach('run-ops-ca');
+
+        expect(receipt.status).toBe('executed');
+        expect(receipt.policyId).toBe('card-activation');
+        expect(receipt.queued).toBe(41);
+        expect(receipt.exceptions).toBe(41);
+        expect(receipt.scanned).toBe(214);
+        expect(receipt.disposition).toBe('Queued for outreach');
+      });
+
+      it('respects the narrowing — CA-R2 alone queues 29', async () => {
+        saveApprovedRules(['CA-R2']);
+        expect((await planActivationOutreach()).queued).toBe(29);
+      });
+
+      it('mints an anchor-derived confirmation id — no Math.random, no Date.now', async () => {
+        saveApprovedRules(CA_RULE_IDS);
+        const expected = `ca-out-${anchorIso.replace(/-/g, '')}`;
+        expect(activationOutreachConfirmationId()).toBe(expected);
+        expect((await runActivationOutreach('run-a')).confirmationId).toBe(expected);
+        expect((await runActivationOutreach('run-b')).confirmationId).toBe(expected);
+      });
+
+      it('writes exactly one action.executed entry, attributed to this run', async () => {
+        saveApprovedRules(CA_RULE_IDS);
+        await runActivationOutreach('run-ops-ca');
+        const actions = queryEvents({ runId: 'run-ops-ca' }).filter(
+          (e) => e.kind === 'action.executed',
+        );
+        expect(actions).toHaveLength(1);
+        expect(actions[0]).toMatchObject({
+          agentId: OPS_AGENT_ID,
+          toolName: 'card-activation.outreach',
+          actor: 'agent',
+        });
+      });
+
+      it('refuses to queue anything before Gate 1 has stored the rules', async () => {
+        await expect(planActivationOutreach()).rejects.toThrow(/no rules configured/);
+        expect(queryEvents()).toHaveLength(0);
+      });
+
+      it('planning is pure — it logs nothing', async () => {
+        saveApprovedRules(CA_RULE_IDS);
+        await planActivationOutreach();
+        expect(queryEvents()).toHaveLength(0);
+      });
     });
   });
 });

@@ -10,12 +10,14 @@
 // process-global, and without it a unit test would silently assert on an empty
 // log and pass.
 //
-// What this pins, for the whole DEMO_THESIS.md use-case-1 conversation:
+// What this pins, for the whole DEMO_THESIS.md use-case-1 conversation AND for
+// use case 3's ops side (the card-activation policy, same two turns against a
+// different uploaded document):
 //   • every tool execution appears, `actor: 'agent'`, under this run's id;
-//   • the two GATED tools appear as `action.executed`, not `tool.executed`
+//   • the GATED tools appear as `action.executed`, not `tool.executed`
 //     (lib/events/telemetry.ts's ACTION_TOOL_NAMES) — the distinction a
 //     reviewer scanning for writes depends on;
-//   • both gate decisions appear as `approval.requested` (agent) followed by
+//   • every gate decision appears as `approval.requested` (agent) followed by
 //     `approval.granted` / `approval.denied` with `actor: 'human'`;
 //   • a DECLINED gate logs the human's decision and executes nothing.
 
@@ -23,9 +25,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { registerTelemetry, readUIMessageStream, type UIMessageChunk } from 'ai';
 import { eventLogTelemetry } from '@/lib/events/telemetry';
 import { query as queryEvents, reset as resetEvents } from '@/lib/events/store';
-import { resetRules } from '@/lib/rules/store';
+import { getRules, resetRules } from '@/lib/rules/store';
 import type { CardinalUIMessage } from '@/lib/agents/registry';
 import { POST as streamPost } from '@/app/api/agents/[agentId]/stream/route';
+import { saveApprovedRules } from './resolvers';
 
 /** Env vars that would make `getAgentModel` reach for a real provider. Cleared
  *  for the duration of this file so the scripted model is the only model in
@@ -40,6 +43,11 @@ const PROVIDER_ENV_KEYS = [
 const UPLOAD_TEXT =
   'Uploaded AU-Eligibility-Policy-2026.docx — please parse this authorized-user policy document.';
 const SWEEP_TEXT = 'Give me the accounts that fail on these authorized-user policies.';
+
+const CA_UPLOAD_TEXT =
+  'Uploaded Card-Activation-Policy-2026.docx — please parse this card-activation policy document.';
+/** The suggestion chip on `/ops` (components/ops/ops-conversation.tsx). */
+const CA_SWEEP_TEXT = 'Run the card-activation policy against the book.';
 
 type LoosePart = { type: string; state?: string; approval?: { id: string; approved?: boolean } };
 type LooseMessage = { id: string; role: string; parts: LoosePart[] };
@@ -268,6 +276,104 @@ describe('ops agent → Event Log (CLAUDE.md 5e)', () => {
     expect(
       queryEvents({ runId }).some(
         (e) => e.kind === 'action.executed' && e.toolName === 'saveRules',
+      ),
+    ).toBe(false);
+  }, 30_000);
+
+  it('logs the card-activation flow end to end, gates and all', async () => {
+    const runId = 'run-ops-events-ca';
+
+    // ——— Turn A: parse the card-activation document, pause at Gate 1 ————
+    const user1 = userMessage('m-user-1', CA_UPLOAD_TEXT);
+    let assistant = await readAssistantMessage(await postTurn(runId, [user1]));
+
+    expect(kindsFor(runId, 'parsePolicyDocument')).toEqual(['tool.executed:agent']);
+    expect(kindsFor(runId, 'saveRules')).toEqual(['approval.requested:agent']);
+
+    const g1 = respondToApproval(assistant, 'tool-saveRules', true, 'm-assistant-1');
+    assistant = await readAssistantMessage(
+      await postTurn(runId, [user1, g1.message]),
+      g1.message as unknown as CardinalUIMessage,
+    );
+
+    expect(kindsFor(runId, 'saveRules')).toEqual([
+      'approval.requested:agent',
+      'approval.granted:human',
+      'action.executed:agent',
+    ]);
+    // Gate 1 is what makes the card-activation policy live.
+    expect(getRules('card-activation').map((r) => r.id)).toEqual(['CA-R1', 'CA-R2']);
+
+    // ——— Turn B: sweep, then pause at the outreach gate ————————————
+    const turnAHistory = [user1, asHistory(assistant, 'm-assistant-1')];
+    const user2 = userMessage('m-user-2', CA_SWEEP_TEXT);
+    let assistant2 = await readAssistantMessage(await postTurn(runId, [...turnAHistory, user2]));
+
+    expect(kindsFor(runId, 'queryViolations')).toEqual(['tool.executed:agent']);
+    expect(kindsFor(runId, 'queueActivationOutreach')).toEqual(['approval.requested:agent']);
+
+    // ——— Approved: the outreach batch runs ———————————————————————
+    const g2 = respondToApproval(
+      assistant2,
+      'tool-queueActivationOutreach',
+      true,
+      'm-assistant-2',
+    );
+    assistant2 = await readAssistantMessage(
+      await postTurn(runId, [...turnAHistory, user2, g2.message]),
+      g2.message as unknown as CardinalUIMessage,
+    );
+
+    expect(kindsFor(runId, 'queueActivationOutreach')).toEqual([
+      'approval.requested:agent',
+      'approval.granted:human',
+      // Gated write → action.executed, not tool.executed.
+      'action.executed:agent',
+    ]);
+    // The batch's own audit entry rode along on this run too — the
+    // card-activation counterpart of `au-policy.remediate`.
+    expect(kindsFor(runId, 'card-activation.outreach')).toEqual(['action.executed:agent']);
+
+    // This policy produces no report, so no report tool ever ran, and the
+    // authorized-user action was never proposed.
+    expect(kindsFor(runId, 'generateReport')).toEqual([]);
+    expect(kindsFor(runId, 'executeBatchRemoval')).toEqual([]);
+
+    const entries = queryEvents({ runId });
+    expect(new Set(entries.map((e) => e.agentId))).toEqual(new Set(['ops']));
+    const humanEntries = entries.filter((e) => e.actor === 'human');
+    expect(humanEntries.map((e) => e.kind)).toEqual(['approval.granted', 'approval.granted']);
+    expect(humanEntries.map((e) => e.toolName)).toEqual([
+      'saveRules',
+      'queueActivationOutreach',
+    ]);
+  }, 30_000);
+
+  it('logs a declined outreach gate as a human decision and queues nothing', async () => {
+    const runId = 'run-ops-events-ca-denied';
+    saveApprovedRules(['CA-R1', 'CA-R2']);
+
+    const user1 = userMessage('m-user-1', CA_SWEEP_TEXT);
+    const assistant = await readAssistantMessage(await postTurn(runId, [user1]));
+    const gate = respondToApproval(
+      assistant,
+      'tool-queueActivationOutreach',
+      false,
+      'm-assistant-1',
+    );
+    await readAssistantMessage(
+      await postTurn(runId, [user1, gate.message]),
+      gate.message as unknown as CardinalUIMessage,
+    );
+
+    expect(kindsFor(runId, 'queueActivationOutreach')).toEqual([
+      'approval.requested:agent',
+      'approval.denied:human',
+    ]);
+    expect(kindsFor(runId, 'card-activation.outreach')).toEqual([]);
+    expect(
+      queryEvents({ runId }).some(
+        (e) => e.kind === 'action.executed' && e.toolName === 'queueActivationOutreach',
       ),
     ).toBe(false);
   }, 30_000);

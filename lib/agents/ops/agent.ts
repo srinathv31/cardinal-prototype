@@ -12,11 +12,13 @@
 // ./tools.ts's header for why the batch-removal tool needs the run id and why
 // a closure is the typed way to get it there.
 //
-// TWO approval gates, both native (CLAUDE.md 5d — "approval gates are real
-// pauses. No auto-approve paths, no approval timeouts"): `saveRules` is G1 and
-// `executeBatchRemoval` is G2. `generateReport` is deliberately NOT gated: it
-// renders a download card and writes nothing, and gating a render would put a
-// human click in front of a no-op.
+// THREE approval gates, all native (CLAUDE.md 5d — "approval gates are real
+// pauses. No auto-approve paths, no approval timeouts"): `saveRules` is G1, and
+// G2 is whichever action the swept policy calls for — `executeBatchRemoval` for
+// the authorized-user policy, `queueActivationOutreach` for card activation.
+// `generateReport` is deliberately NOT gated: it renders a download card and
+// writes nothing, and gating a render would put a human click in front of a
+// no-op.
 
 import { ToolLoopAgent, stepCountIs, type InferAgentUIMessage } from 'ai';
 import { getAgentModel } from '@/lib/ai/provider';
@@ -30,6 +32,12 @@ approved, and recommending what to do about what you find. You route to
 tools for everything — you never chat freely, and you never state a figure
 you did not get from a tool result.
 
+You service two policies — an authorized-user policy and a card-activation
+policy. You never choose between them: the document the user uploaded picks
+one, and every later step of that conversation works against it. The tool
+results tell you which one you are in; do not infer it and do not announce a
+policy no tool named.
+
 ## The flow you run
 1. The user uploads a policy document. Call parsePolicyDocument once, with
    the file name their message reported.
@@ -42,12 +50,17 @@ you did not get from a tool result.
    plainly — never describe a scan that did not run.
 4. Once the results are on screen, WITHOUT waiting to be asked, recommend
    what to do about them: name the rule with the most exceptions by its
-   stored title, quote its requirement, and propose the batch removal by
-   calling executeBatchRemoval in the same turn. That call pauses for the
+   stored title, quote its requirement, and propose the action that policy
+   calls for, in the same turn. For the authorized-user policy that action is
+   executeBatchRemoval; for the card-activation policy it is
+   queueActivationOutreach. Call exactly one of them, and only the one that
+   matches the policy queryViolations just reported. That call pauses for the
    user's approval.
-5. If the removal is approved, call generateReport immediately — it renders
-   the audit-report download card. If the removal is DECLINED, execute
-   nothing, generate no report, and say plainly that nothing was removed.
+5. If an authorized-user batch removal is approved, call generateReport
+   immediately — it renders the audit-report download card. The
+   card-activation policy has no report: after approved outreach, close on
+   what was queued and offer no file. If either action is DECLINED, execute
+   nothing, generate no report, and say plainly that nothing was done.
 
 ## Hard rules
 - Every number, date, name, rule title, and rule sentence in your narration
@@ -73,8 +86,11 @@ export function createOpsAgent({ runId }: { runId: string }) {
     toolApproval: {
       // G1 — adopting rules writes to the rule store.
       saveRules: 'user-approval',
-      // G2 — the batch removal. Mocked downstream, gated for real here.
+      // G2, authorized-user — the batch removal. Mocked downstream, gated for
+      // real here.
       executeBatchRemoval: 'user-approval',
+      // G2, card-activation — the outreach batch. Same treatment.
+      queueActivationOutreach: 'user-approval',
     },
     runtimeContext: { runId, agentId: 'ops' as const },
     telemetry: {

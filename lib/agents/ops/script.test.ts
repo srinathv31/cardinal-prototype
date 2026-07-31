@@ -35,6 +35,7 @@ import { reset as resetEvents, query as queryEvents } from '@/lib/events/store';
 import {
   buildAuditReport,
   parsePolicyDocument,
+  planActivationOutreach,
   resolveViolations,
   saveApprovedRules,
 } from './resolvers';
@@ -322,6 +323,178 @@ describe.each(ANCHORS)('ops script @ anchor %s', (anchorIso) => {
       expect(result.steps[2]?.narration).toContain(report.confirmationId);
       // …and the close names the file on the card.
       expect(result.steps.at(-1)?.narration).toContain(report.filename);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // DEMO_THESIS.md use case 3, ops side — "same practice as use case 1"
+  // -------------------------------------------------------------------------
+
+  describe('the card-activation policy', () => {
+    const upload =
+      'Uploaded Card-Activation-Policy-2026.docx — please parse this card-activation policy document.';
+    const sweep = 'Run the card-activation policy against the book.';
+
+    it('parses the card-activation document and proposes its two rules behind Gate 1', async () => {
+      const result = await driveScript(opsScript, upload);
+
+      expect(result.calls.map((c) => c.toolName)).toEqual(['parsePolicyDocument', 'saveRules']);
+      parseWithToolSchema(tools.parsePolicyDocument.inputSchema, result.calls[0]?.input);
+      parseWithToolSchema(tools.saveRules.inputSchema, result.calls[1]?.input);
+
+      expect(result.calls[0]?.input).toEqual({
+        documentRef: 'Card-Activation-Policy-2026.docx',
+      });
+      expect(result.calls[1]?.input).toMatchObject({ ruleIds: ['CA-R1', 'CA-R2'] });
+
+      const parsed = parsePolicyDocument('Card-Activation-Policy-2026.docx');
+      const proposal = result.steps[1];
+      for (const ruleId of parsed.ruleIds) {
+        expect(proposal?.narration).toContain(ruleId);
+      }
+      expect(proposal?.narration).toContain(parsed.documentTitle);
+      expect(proposal?.narration.toLowerCase()).toContain('can i add these');
+
+      const closing = result.steps.at(-1);
+      expect(result.steps.filter((s) => s.done)).toHaveLength(1);
+      expect(closing?.narration).toContain('card-activation rule store');
+    });
+
+    it('names the card-activation store, not the authorized-user one, when declined', async () => {
+      const result = await driveScript(opsScript, upload, () => 'denied');
+      const closing = result.steps.at(-1);
+      expect(closing?.narration.toLowerCase()).toContain('no rules were added');
+      expect(closing?.narration).toContain('card-activation rule store');
+      expect(getRules('card-activation')).toHaveLength(0);
+      expect(queryEvents()).toHaveLength(0);
+    });
+
+    it('sweeps, volunteers the outreach recommendation unprompted, gates it, and closes — no report', async () => {
+      saveApprovedRules(['CA-R1', 'CA-R2']);
+      const result = await driveScript(opsScript, sweep);
+
+      // Three beats, not four: the card-activation policy produces no audit
+      // report (DEMO_THESIS.md's endpoint checklist puts row 9 on UC1 only),
+      // and the close must not promise a file that no route serves.
+      expect(result.calls.map((c) => c.toolName)).toEqual([
+        'queryViolations',
+        'queueActivationOutreach',
+      ]);
+      expect(result.calls.some((c) => c.toolName === 'generateReport')).toBe(false);
+      parseWithToolSchema(tools.queryViolations.inputSchema, result.calls[0]?.input);
+      parseWithToolSchema(tools.queueActivationOutreach.inputSchema, result.calls[1]?.input);
+      // …and never the other policy's action.
+      expect(result.calls.some((c) => c.toolName === 'executeBatchRemoval')).toBe(false);
+
+      expect(result.steps.filter((s) => s.done)).toHaveLength(1);
+      expect(result.steps.at(-1)?.done).toBe(true);
+      for (const step of result.steps) expect(step.narration.length).toBeGreaterThan(0);
+    });
+
+    it('cites CA-R2 — the dominant rule — by its stored title, count, and requirement', async () => {
+      saveApprovedRules(['CA-R1', 'CA-R2']);
+      const result = await driveScript(opsScript, sweep);
+
+      // Step 2 is the unprompted beat: no user message precedes it.
+      const recommendation = result.steps[1];
+      expect(recommendation?.toolCalls.map((c) => c.toolName)).toEqual([
+        'queueActivationOutreach',
+      ]);
+
+      const violations = await resolveViolations();
+      if (violations.status !== 'ok') throw new Error('unreachable');
+      const lead = violations.byRule.reduce((max, r) => (r.count > max.count ? r : max));
+      const storedLead = getRules('card-activation').find((r) => r.id === lead.ruleId);
+
+      expect(lead.ruleId).toBe('CA-R2');
+      expect(lead.count).toBe(29);
+      expect(recommendation?.narration).toContain(lead.title);
+      expect(recommendation?.narration).toContain(String(lead.count));
+      expect(recommendation?.narration).toContain(storedLead!.requirement);
+      // The sweep line counts CARDS, not authorized-user relationships.
+      expect(recommendation?.narration).toContain('214 issued cards swept');
+      expect(recommendation?.narration).toContain(String(violations.exceptions));
+      expect(recommendation?.narration).toContain(String(violations.accountsAffected));
+    });
+
+    it('queues nothing and promises nothing when the outreach gate is declined', async () => {
+      saveApprovedRules(['CA-R1', 'CA-R2']);
+      const result = await driveScript(opsScript, sweep, (toolName) =>
+        toolName === 'queueActivationOutreach' ? 'denied' : 'approved',
+      );
+
+      expect(result.calls.map((c) => c.toolName)).toEqual([
+        'queryViolations',
+        'queueActivationOutreach',
+      ]);
+      const closing = result.steps.at(-1);
+      expect(closing?.done).toBe(true);
+      expect(closing?.narration.toLowerCase()).toContain('no outreach was queued');
+      expect(closing?.narration).toContain('41');
+      expect(queryEvents()).toHaveLength(0);
+    });
+
+    it('closes on the confirmation id the outreach batch actually mints', async () => {
+      saveApprovedRules(['CA-R1', 'CA-R2']);
+      const result = await driveScript(opsScript, sweep);
+      const outreach = await planActivationOutreach();
+
+      const closing = result.steps.at(-1);
+      expect(closing?.narration).toContain(outreach.confirmationId);
+      expect(closing?.narration).toContain(String(outreach.queued));
+      // No file is named, because none is produced.
+      expect(closing?.narration).not.toMatch(/\.html\b/);
+    });
+
+    it('says so plainly when the sweep runs before any rules are stored', async () => {
+      const result = await driveScript(opsScript, sweep);
+      expect(result.calls.map((c) => c.toolName)).toEqual(['queryViolations']);
+      expect(result.steps.at(-1)?.done).toBe(true);
+    });
+
+    it('runs the whole use case back to back in one conversation', async () => {
+      const turnA = await driveScript(opsScript, upload);
+      saveApprovedRules(['CA-R1', 'CA-R2']);
+      const turnB = await driveScript(
+        opsScript,
+        'Which accounts fail card activation?',
+        () => 'approved',
+        turnA.prompt,
+      );
+      expect(turnB.calls.map((c) => c.toolName)).toEqual([
+        'queryViolations',
+        'queueActivationOutreach',
+      ]);
+    });
+
+    it('quotes no figure it did not fetch (both turns, every step)', async () => {
+      saveApprovedRules(['CA-R1', 'CA-R2']);
+      const text = [
+        emittedText(await driveScript(opsScript, upload)),
+        emittedText(await driveScript(opsScript, sweep)),
+      ].join(' \n ');
+
+      const grounded = JSON.stringify([
+        parsePolicyDocument('Card-Activation-Policy-2026.docx'),
+        await resolveViolations(),
+        await planActivationOutreach(),
+        getRules('card-activation'),
+      ]);
+      const groundedRuns = new Set(grounded.match(DIGIT_RUN) ?? []);
+
+      const emittedRuns = new Set(text.match(DIGIT_RUN) ?? []);
+      expect(emittedRuns.size).toBeGreaterThan(0);
+      for (const run of emittedRuns) {
+        expect(groundedRuns.has(run), `figure "${run}" is not in any resolver output`).toBe(true);
+      }
+    });
+
+    it('leaves the authorized-user flow alone — an AU upload still parses the AU document', async () => {
+      const auUpload =
+        'Uploaded AU-Eligibility-Policy-2026.docx — please parse this authorized-user policy document.';
+      const result = await driveScript(opsScript, auUpload);
+      expect(result.calls[1]?.input).toMatchObject({ ruleIds: ['R1', 'R2', 'R3'] });
+      expect(result.steps.at(-1)?.narration).toContain('authorized-user rule store');
     });
   });
 

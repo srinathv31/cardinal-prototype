@@ -26,8 +26,18 @@
 //        nothing and say so
 //     7. close
 //
-// Both gates close truthfully when declined (`toolDisposition`, verified shape
-// per docs/ai-sdk7-notes.md: a declined client-executed tool arrives as a
+// DEMO_THESIS.md use case 3's ops side is the SAME two turns against a
+// different uploaded document ("same practice as use case 1"), and this script
+// plays it with the same steps rather than a parallel state machine: turn A is
+// policy-agnostic already (every string it says comes off the parse result),
+// and turn B forks exactly once — at the action the swept policy calls for.
+// Card activation's is `queueActivationOutreach`, and it has no report to
+// follow, so its turn closes one step earlier. Which policy is in play is read
+// from the resolvers, never matched out of the user's words: the document the
+// presenter uploaded decided it (./resolvers.ts's header).
+//
+// All three gates close truthfully when declined (`toolDisposition`, verified
+// shape per docs/ai-sdk7-notes.md: a declined client-executed tool arrives as a
 // normal tool-result whose `output.type` is `'execution-denied'`).
 
 import type { AgentScript, ScriptStep } from '@/lib/ai/scripted/types';
@@ -40,6 +50,8 @@ import {
 import {
   buildAuditReport,
   parsePolicyDocument,
+  planActivationOutreach,
+  policyScanUnit,
   resolveViolations,
   storedRequirement,
   type ParsedPolicyDocument,
@@ -69,7 +81,13 @@ function matchOpsRequest(text: string): OpsMatch {
     q.includes('non-compliant') ||
     q.includes('out of compliance') ||
     q.includes('sweep') ||
-    q.includes('scan')
+    q.includes('scan') ||
+    // Use case 3's own phrasing and the suggestion chip that carries it
+    // ("Run the card-activation policy against the book"). Reached only after
+    // the upload branch above has had its chance, so the card-activation
+    // UPLOAD turn — which also says "card activation" — still parses.
+    q.includes('against the book') ||
+    (q.includes('card') && q.includes('activation'))
   ) {
     return 'violations';
   }
@@ -85,15 +103,18 @@ const FILENAME_PATTERN = /[\w][\w.-]*\.(?:docx?|pdf|md|txt)\b/i;
 
 /** The uploaded file's name as the user's own message reported it — a pure
  * function of that text, never invented. Recorded on the tool call for the
- * audit trail; the parse itself reads the checked-in document either way
- * (DEMO_BUILD_PLAN.md: "The *file* is real; the *content* is pinned"). */
-function extractDocumentRef(text: string, fallback: string): string {
+ * audit trail, and used to pick which checked-in document is parsed; the parse
+ * reads that document's own content either way (DEMO_BUILD_PLAN.md: "The
+ * *file* is real; the *content* is pinned"). Undefined when the message names
+ * no file at all, which is the case the caller resolves against the whole
+ * sentence instead. */
+function extractDocumentRef(text: string): string | undefined {
   const match = FILENAME_PATTERN.exec(text);
-  return match ? match[0].trim() : fallback;
+  return match ? match[0].trim() : undefined;
 }
 
 const CANT_HELP_NARRATION =
-  'I work the authorized-user policy here: upload a policy document and I will extract the rules for your approval, then sweep the book for accounts that fail them and recommend what to do about it. Start by uploading the policy.';
+  'I work servicing policy here — authorized-user eligibility and card activation: upload a policy document and I will extract the rules for your approval, then sweep the book for accounts that fail them and recommend what to do about it. Start by uploading the policy.';
 
 /** The drafted rules and the parked obligation, read off the SAME render
  * instruction the parsePolicyDocument tool returns — so every rule this
@@ -128,7 +149,13 @@ export const opsScript: AgentScript = {
     // Turn A — upload → parse → Gate 1
     // ————————————————————————————————————————————————————————————————
     if (match === 'upload') {
-      const parsed = parsePolicyDocument();
+      // The file name selects the document when the message names one; with no
+      // file name, the sentence itself is handed to the same keyword match, so
+      // "parse this card-activation policy document" still resolves without an
+      // attachment. Either way the resolver picks a CHECKED-IN document — this
+      // text never becomes on-screen data.
+      const fileName = extractDocumentRef(requestText);
+      const parsed = parsePolicyDocument(fileName ?? requestText);
 
       if (countToolResults(results, 'parsePolicyDocument') === 0) {
         return {
@@ -136,9 +163,7 @@ export const opsScript: AgentScript = {
           toolCalls: [
             {
               toolName: 'parsePolicyDocument',
-              input: {
-                documentRef: extractDocumentRef(requestText, `${parsed.documentId}.docx`),
-              },
+              input: { documentRef: fileName ?? `${parsed.documentId}.docx` },
             },
           ],
           done: false,
@@ -172,8 +197,8 @@ export const opsScript: AgentScript = {
       return {
         narration:
           disposition === 'approved'
-            ? `Stored — ${parsed.ruleIds.join(', ')} are now active in the authorized-user rule store. Ask me which accounts fail them whenever you are ready.`
-            : 'Understood — no rules were added. The authorized-user rule store is unchanged, so there is nothing to evaluate against yet.',
+            ? `Stored — ${parsed.ruleIds.join(', ')} are now active in the ${parsed.policyId} rule store. Ask me which accounts fail them whenever you are ready.`
+            : `Understood — no rules were added. The ${parsed.policyId} rule store is unchanged, so there is nothing to evaluate against yet.`,
         toolCalls: [],
         done: true,
       };
@@ -198,10 +223,62 @@ export const opsScript: AgentScript = {
         return { narration: violations.message, toolCalls: [], done: true };
       }
 
-      const { exceptions, accountsAffected, scanned, byRule } = violations;
+      const { exceptions, accountsAffected, scanned, byRule, policyId } = violations;
       // The largest rule group by the evaluator's count — cited by its STORED
       // title, i.e. the title the human approved at Gate 1.
       const leadRule = byRule.reduce((max, rule) => (rule.count > max.count ? rule : max), byRule[0]);
+      const leadRequirement = storedRequirement(leadRule.ruleId, policyId);
+      // "N of them break <stored title> — "<stored requirement>" — the single
+      // largest group." Shared by both policies: the sentence names the rule
+      // the evaluator itself put on top, never one chosen here.
+      const leadSentence = leadRequirement
+        ? `${leadRule.count} of them break ${leadRule.title} — "${leadRequirement}" — the single largest group. `
+        : `${leadRule.count} of them break ${leadRule.title}, the single largest group. `;
+      // "962 authorized-user relationships swept" / "214 issued cards swept" —
+      // the unit is the policy's, from the resolvers (CLAUDE.md 5a).
+      const sweptSentence = `${scanned} ${policyScanUnit(policyId)} swept: ${exceptions} exceptions across ${accountsAffected} accounts. `;
+
+      // ——— Card activation: outreach, and no report ————————————————
+      if (policyId === 'card-activation') {
+        if (countToolResults(results, 'queueActivationOutreach') === 0) {
+          // The same unprompted beat as the AU turn below, pointed at the
+          // action this policy's own text prescribes ("flagged for cardholder
+          // outreach").
+          return {
+            narration:
+              sweptSentence +
+              leadSentence +
+              `Chasing one of these by hand runs about ten minutes an account. I recommend queueing activation outreach to all ${accountsAffected} primary cardholders in one batch, the ${leadRule.count} ${leadRule.ruleId} cases first. Approve below and I will queue it.`,
+            toolCalls: [
+              {
+                toolName: 'queueActivationOutreach',
+                input: {
+                  rationale: `Queue activation outreach to the ${accountsAffected} primary cardholders behind the ${exceptions} flagged cards, led by the ${leadRule.count} ${leadRule.ruleId} cases.`,
+                },
+              },
+            ],
+            done: false,
+          };
+        }
+
+        const outreachDisposition = toolDisposition(results, 'queueActivationOutreach');
+        if (outreachDisposition !== 'approved') {
+          return {
+            narration: `Understood — no outreach was queued. All ${exceptions} flagged cards across ${accountsAffected} accounts stay out of compliance, and the rule store is unchanged.`,
+            toolCalls: [],
+            done: true,
+          };
+        }
+
+        // Fresh, independent read of the batch the tool just executed — the
+        // figures below are the resolver's, not this script's.
+        const outreach = await planActivationOutreach();
+        return {
+          narration: `Outreach queued to ${outreach.queued} primary cardholders, recorded under ${outreach.confirmationId}. Every one of the ${outreach.exceptions} flagged cards stays on the exception list until it is activated or reissued.`,
+          toolCalls: [],
+          done: true,
+        };
+      }
 
       if (countToolResults(results, 'executeBatchRemoval') === 0) {
         // THE UNPROMPTED BEAT (DEMO_THESIS.md use case 1 beat 6): no user
@@ -209,13 +286,9 @@ export const opsScript: AgentScript = {
         // the aggregate it just rendered, and opens Gate 2 in the same turn.
         // The rule is named by its STORED title and quoted by its STORED
         // requirement, never by a gloss written here.
-        const leadRequirement = storedRequirement(leadRule.ruleId);
-        const leadSentence = leadRequirement
-          ? `${leadRule.count} of them break ${leadRule.title} — "${leadRequirement}" — the single largest group. `
-          : `${leadRule.count} of them break ${leadRule.title}, the single largest group. `;
         return {
           narration:
-            `${scanned} authorized-user relationships swept: ${exceptions} exceptions across ${accountsAffected} accounts. ` +
+            sweptSentence +
             leadSentence +
             // "about ten minutes an account" is DEMO_THESIS.md's stated
             // business constant, spelled out rather than fetched — it is the
