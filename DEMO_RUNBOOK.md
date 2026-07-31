@@ -3,12 +3,30 @@
 Presenter crib sheet. What to type, what to click, what should appear. Scope is `DEMO_THESIS.md`'s
 three use cases; everything else in the app is parked.
 
+## The model: live with a scripted net (branch `live-llm`)
+
+The agents now run on a **real LLM** — the local llama.cpp endpoint on the LAN
+(`.env.example`'s `local` provider block; credentials live in `.env.local`, gitignored).
+`DEMO_MODE` picks the posture:
+
+| Posture | Config | Behavior |
+|---|---|---|
+| **Demo (recommended)** | `DEMO_MODE=scripted` + `.env.local`'s local provider | live model first on every beat; any error or stall past `DEMO_LLM_TIMEOUT_MS` (8 s default) falls back to the rehearsed script for that beat. An LLM outage mid-demo degrades, it never errors. |
+| Dev / tuning | `DEMO_MODE=live` | raw model, errors surface. What `.env.local` ships set to — flip it before demoing. |
+| No-network | `DEMO_MODE=scripted`, no provider env | the pure checked-in script, byte-stable. The zero-risk parachute. |
+
+Live narration **wording varies run to run** — that is the point, it's a real model. What never
+varies: every figure, card, table, id, and gate (all server-derived), and the beat order below.
+Verified live end-to-end 2026-07-30 (all three use cases, both gate decisions, both personas).
+
 ## Pre-flight (10 minutes before, both demo days)
 
 ```bash
+curl http://192.168.6.63:8080/v1/models          # LLM host up? (IP is DHCP — if refused, fix .env.local, start serve.ps1 on the host)
+npm run verify:live                              # live-path go / no-go — expect "RESULT: PASS"
 npm run build                                    # once per code state
-DEMO_ANCHOR_DATE=2026-08-05 npm start            # http://localhost:3000
-node scripts/demo-replay.mjs                     # go / no-go — expect "19/19 beats passed" + "RESULT: PASS"
+DEMO_MODE=scripted DEMO_ANCHOR_DATE=2026-08-05 npm start   # http://localhost:3000 — demo posture
+node scripts/demo-replay.mjs                     # scripted-net go / no-go — expect "19/19 beats passed" + "RESULT: PASS"
 ```
 
 - **Pin `DEMO_ANCHOR_DATE=2026-08-05` on the run command, on BOTH days.** Seed dates are day-offsets
@@ -27,8 +45,9 @@ node scripts/demo-replay.mjs                     # go / no-go — expect "19/19 
   the production build and runtime need no network (commit `350f650`); and dev compiles each route on
   first visit, so the first click on `/ops` stalls on a projector. Use `npm run dev` only if you have
   to edit code between runs.
-- No API key is needed or used. `DEMO_MODE=scripted` is the default and every rehearsed beat is a
-  checked-in script.
+- The live path needs `.env.local` (`CARDINAL_PROVIDER=local`, `LOCAL_LLM_BASE_URL`,
+  `LOCAL_LLM_API_KEY`) — no hosted API key, the model is on the LAN. The scripted fallback needs
+  nothing: with no provider env at all, every rehearsed beat is the checked-in script.
 
 ## Use case 1 — authorized-user policy, ops chat (`/ops`)
 
@@ -36,8 +55,8 @@ node scripts/demo-replay.mjs                     # go / no-go — expect "19/19 
 |---|---|---|
 | 1 | **Attach policy** → pick any file whose name does *not* say "activation" | Your turn: "Uploaded *file* — please parse this authorized-user policy document." |
 | 2 | (wait) | Rule Diff card: 3 drafted rules (R1/R2/R3) with citations, **plus a 4th obligation parked as a data gap** |
-| 3 | (wait) | **Gate 1** approval card — "Can I add these 3 rules to the rule store?" |
-| 4 | Click **Approve** | "Stored — R1, R2, R3 are now active in the authorized-user rule store." |
+| 3 | (wait — same turn) | Narration names the rules and the data gap, asks "Can I add these rules?", and **Gate 1's approval card arrives in the same turn** — the card is the question |
+| 4 | Click **Approve** | "Rules stored" chip + one closing line (live wording varies), then the agent stops — the sweep is yours |
 | 5 | Click chip **"Give me the accounts that fail on these authorized-user policies."** | ViolationsDashboard: **962** scanned · **74** accounts affected · **87** exceptions; bars 61 / 19 / 7 |
 | 6 | Click any table row | Inline drill-down: which account, which rule, the finding sentence. No second fetch — the facts shipped with the row |
 | 7 | (no prompt — wait) | **The unprompted beat**: the agent volunteers the recommendation, cites R1 by its approved title and count, and opens **Gate 2** in the same turn |
@@ -103,4 +122,12 @@ Signed in as Anand Patel. Three chips plus one typed question:
 
 - A stuck or half-rendered conversation → **New conversation** (button top-right of the chat), or ↺.
 - Odd totals or leftover state → ↺ reset, then re-run the use case from step 1.
-- Anything worse → `Ctrl-C`, `DEMO_ANCHOR_DATE=2026-08-05 npm start`, `node scripts/demo-replay.mjs`.
+- **LLM host dies mid-demo** → in `DEMO_MODE=scripted` nothing to do: each beat waits at most
+  `DEMO_LLM_TIMEOUT_MS` (8 s) then plays the script — narration tone shifts, figures don't. If the
+  host will stay down, restart the server with no provider (`CARDINAL_PROVIDER= npm start` after
+  Ctrl-C) so beats stop paying the timeout.
+- Model behaving oddly (wrong tool, chatty figures) → ↺ reset and re-run; if it repeats, fall back to
+  the pure script (previous bullet). The invariants hold either way — the model cannot invent a
+  number, only phrase around the tool results.
+- Anything worse → `Ctrl-C`, `DEMO_MODE=scripted DEMO_ANCHOR_DATE=2026-08-05 npm start`,
+  `node scripts/demo-replay.mjs`.
