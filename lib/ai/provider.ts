@@ -13,20 +13,23 @@ import { createFallbackModel } from './scripted/fallback-model';
 import { createScriptedModel } from './scripted/scripted-model';
 import type { AgentScript } from './scripted/types';
 
-export type CardinalProvider = 'anthropic' | 'openai' | 'azure';
+export type CardinalProvider = 'anthropic' | 'openai' | 'azure' | 'local';
 
 const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
+const DEFAULT_LOCAL_MODEL = 'gpt-4.1-turbo';
 
 function currentProvider(): CardinalProvider {
   const raw = process.env.CARDINAL_PROVIDER ?? 'anthropic';
-  if (raw === 'anthropic' || raw === 'openai' || raw === 'azure') return raw;
+  if (raw === 'anthropic' || raw === 'openai' || raw === 'azure' || raw === 'local') return raw;
   throw new Error(
-    `Unknown CARDINAL_PROVIDER "${raw}" — expected "anthropic", "openai", or "azure".`,
+    `Unknown CARDINAL_PROVIDER "${raw}" — expected "anthropic", "openai", "azure", or "local".`,
   );
 }
 
 /** Env vars each provider needs before a call can succeed. CARDINAL_MODEL has
- * a default for anthropic only, so it's required here for the other two. */
+ * a default for anthropic and local only, so it's required here for the
+ * other two. `local` reads its base URL from env rather than a hardcoded
+ * default — the host IP is DHCP-assigned. */
 function requiredEnvVars(provider: CardinalProvider): string[] {
   switch (provider) {
     case 'anthropic':
@@ -35,6 +38,8 @@ function requiredEnvVars(provider: CardinalProvider): string[] {
       return ['OPENAI_API_KEY', 'CARDINAL_MODEL'];
     case 'azure':
       return ['AZURE_API_KEY', 'AZURE_RESOURCE_NAME', 'CARDINAL_MODEL'];
+    case 'local':
+      return ['LOCAL_LLM_BASE_URL', 'LOCAL_LLM_API_KEY'];
   }
 }
 
@@ -72,7 +77,11 @@ export function getLanguageModel(): LanguageModel {
   const provider = currentProvider();
   const modelId =
     process.env.CARDINAL_MODEL ??
-    (provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : undefined);
+    (provider === 'anthropic'
+      ? DEFAULT_ANTHROPIC_MODEL
+      : provider === 'local'
+        ? DEFAULT_LOCAL_MODEL
+        : undefined);
   if (!modelId) {
     // Unreachable in practice — assertProviderConfigured() already requires
     // CARDINAL_MODEL for openai/azure — but keeps this function safe to call
@@ -87,6 +96,19 @@ export function getLanguageModel(): LanguageModel {
       return createOpenAI()(modelId);
     case 'azure':
       return createAzure()(modelId);
+    case 'local':
+      // llama.cpp's OpenAI-compatible server only implements the Chat
+      // Completions surface — `.chat(modelId)` targets that explicitly.
+      // The bare factory (`createOpenAI(...)(modelId)`) targets OpenAI's
+      // Responses API instead and fails against llama.cpp. `.chat()` is
+      // still declared to return LanguageModelV4 concretely (verified in
+      // node_modules/@ai-sdk/openai/dist/index.d.ts), so the cast in
+      // getAgentModel below keeps working unchanged.
+      return createOpenAI({
+        name: 'local',
+        baseURL: process.env.LOCAL_LLM_BASE_URL,
+        apiKey: process.env.LOCAL_LLM_API_KEY,
+      }).chat(modelId);
   }
 }
 
