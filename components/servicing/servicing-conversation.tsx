@@ -47,7 +47,7 @@ import { Suggestion } from "@/components/ai-elements/suggestion";
 import { messageText, resolveErrorMessage } from "@/components/ask/utils";
 import type { CardinalUIMessage } from "@/lib/agents/registry";
 import { servicingRunId, type ServicingPersona } from "@/lib/agents/servicing/identity";
-import { ServicingAssistantParts } from "./servicing-assistant-parts";
+import { hasOpenGate, ServicingAssistantParts } from "./servicing-assistant-parts";
 
 const SUGGESTED_QUESTIONS = [
   "What are my latest transactions?",
@@ -85,10 +85,15 @@ export function ServicingConversation({
 
   const hasStarted = messages.length > 0;
   const isBusy = status === "submitted" || status === "streaming";
+  // While a gate sits open (stream status is 'ready' — isBusy is false) the
+  // only live controls should be the ApprovalCard's own two buttons; see
+  // hasOpenGate's header in servicing-assistant-parts.tsx.
+  const gateOpen = hasOpenGate(messages);
+  const controlsDisabled = isBusy || gateOpen;
 
   function submitText(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || isBusy) return;
+    if (!trimmed || controlsDisabled) return;
     sendMessage({ text: trimmed });
     setInput("");
   }
@@ -107,7 +112,7 @@ export function ServicingConversation({
               key={question}
               suggestion={question}
               onClick={submitText}
-              disabled={isBusy}
+              disabled={controlsDisabled}
             />
           ))}
         </div>
@@ -174,10 +179,10 @@ export function ServicingConversation({
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="Ask about your account…"
-          disabled={isBusy}
+          disabled={controlsDisabled}
           aria-label="Ask about your account"
         />
-        <Button type="submit" disabled={isBusy || input.trim().length === 0}>
+        <Button type="submit" disabled={controlsDisabled || input.trim().length === 0}>
           <SendHorizontal className="size-4" />
           Send
         </Button>

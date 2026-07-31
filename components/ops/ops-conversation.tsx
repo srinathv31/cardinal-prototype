@@ -45,7 +45,7 @@ import { LiveAgentGraph } from "@/components/sentinel/live-agent-graph";
 import { messageText, resolveErrorMessage } from "@/components/ask/utils";
 import type { CardinalUIMessage } from "@/lib/agents/registry";
 import { deriveOpsGraphState } from "./graph-state";
-import { OpsAssistantParts } from "./ops-assistant-parts";
+import { hasOpenGate, OpsAssistantParts } from "./ops-assistant-parts";
 
 const SUGGESTED_REQUESTS = [
   "Give me the accounts that fail on these authorized-user policies.",
@@ -90,11 +90,16 @@ export function OpsConversation({ onNewConversation }: { onNewConversation: () =
 
   const hasStarted = messages.length > 0;
   const isBusy = status === "submitted" || status === "streaming";
+  // While a gate sits open (stream status is 'ready' — isBusy is false) the
+  // only live controls should be the ApprovalCard's own two buttons; see
+  // hasOpenGate's header in ops-assistant-parts.tsx.
+  const gateOpen = hasOpenGate(messages);
+  const controlsDisabled = isBusy || gateOpen;
   const graph = useMemo(() => deriveOpsGraphState(messages, isBusy), [messages, isBusy]);
 
   function submitText(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || isBusy) return;
+    if (!trimmed || controlsDisabled) return;
     sendMessage({ text: trimmed });
     setInput("");
   }
@@ -121,7 +126,7 @@ export function OpsConversation({ onNewConversation }: { onNewConversation: () =
               key={request}
               suggestion={request}
               onClick={submitText}
-              disabled={isBusy}
+              disabled={controlsDisabled}
             />
           ))}
         </div>
@@ -215,7 +220,7 @@ export function OpsConversation({ onNewConversation }: { onNewConversation: () =
         <Button
           type="button"
           variant="outline"
-          disabled={isBusy}
+          disabled={controlsDisabled}
           onClick={() => fileInputRef.current?.click()}
           aria-label="Attach a policy document"
         >
@@ -226,10 +231,10 @@ export function OpsConversation({ onNewConversation }: { onNewConversation: () =
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="Ask about policy compliance…"
-          disabled={isBusy}
+          disabled={controlsDisabled}
           aria-label="Ask about policy compliance"
         />
-        <Button type="submit" disabled={isBusy || input.trim().length === 0}>
+        <Button type="submit" disabled={controlsDisabled || input.trim().length === 0}>
           <SendHorizontal className="size-4" />
           Send
         </Button>

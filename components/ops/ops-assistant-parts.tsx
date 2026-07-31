@@ -56,6 +56,39 @@ const GATE_COPY = {
   },
 } as const;
 
+/** The wire part types this surface treats as approval gates — derived from
+ * `GATE_COPY`'s own keys rather than a second literal list, so the set
+ * `hasOpenGate` below checks can never drift from the set `GatePart`'s
+ * switch (further down) actually renders buttons for. */
+const GATED_TOOL_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(GATE_COPY).map((name) => `tool-${name}`),
+);
+
+/** The minimal message shape `hasOpenGate` needs — structural rather than
+ * `CardinalUIMessage`, so it stays a tiny pure function a test can call with
+ * plain object literals (no AI SDK generics to satisfy). */
+export interface GateInputMessage {
+  role: string;
+  parts: ReadonlyArray<{ type: string; state?: string }>;
+}
+
+/** True if any assistant message carries a gate part still awaiting a human
+ * decision — the exact `state === "approval-requested"` check `GatePart`'s
+ * switch (below) uses to decide the ApprovalCard's two buttons are
+ * clickable, so this can never disagree with what's actually on screen.
+ * `OpsConversation` disables every OTHER control (chips, attach, input,
+ * send) while this is true, so a presenter can't abandon an open gate by
+ * clicking a suggestion or sending a message instead of resolving it. */
+export function hasOpenGate(messages: readonly GateInputMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.parts.some(
+        (part) => GATED_TOOL_TYPES.has(part.type) && part.state === "approval-requested",
+      ),
+  );
+}
+
 /** Structural read of the `render` field the three read tools put on their
  * output. Defensive rather than typed-through: a part mid-stream, or a future
  * tool that returns no render, must degrade to "nothing to draw" and never

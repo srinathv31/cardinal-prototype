@@ -45,6 +45,40 @@ const ACTIVATE_CARD_COPY = {
   declineLabel: "Cancel",
 };
 
+/** The two wire part types this surface treats as approval gates — exactly
+ * the `tool-*` types `ServicingPart`'s switch (below) routes to
+ * `ContactChangePart` / `ActivateCardPart`. */
+const GATED_TOOL_TYPES: ReadonlySet<string> = new Set([
+  "tool-updateContactInfo",
+  "tool-activateCard",
+]);
+
+/** The minimal message shape `hasOpenGate` needs — structural rather than
+ * `CardinalUIMessage`, so it stays a tiny pure function a test can call with
+ * plain object literals (no AI SDK generics to satisfy). */
+export interface GateInputMessage {
+  role: string;
+  parts: ReadonlyArray<{ type: string; state?: string }>;
+}
+
+/** True if any assistant message carries a gate part still awaiting a human
+ * decision — the exact `state === "approval-requested"` check
+ * `ContactChangePart`/`ActivateCardPart`'s switches (below) use to decide
+ * the ApprovalCard's two buttons are clickable, so this can never disagree
+ * with what's actually on screen. `ServicingConversation` disables every
+ * OTHER control (chips, input, send) while this is true, so a presenter
+ * can't abandon an open gate by clicking a suggestion or sending a message
+ * instead of resolving it. */
+export function hasOpenGate(messages: readonly GateInputMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.parts.some(
+        (part) => GATED_TOOL_TYPES.has(part.type) && part.state === "approval-requested",
+      ),
+  );
+}
+
 /** Labels of any renderEvidence parts already rendered earlier in THIS
  * message — the same "evidence shown so far" idea
  * components/run-view/utils.ts's evidenceLabelsSoFar carries, scoped to one
