@@ -30,15 +30,19 @@ const CONTACT_CHANGE_COPY = {
   description: "We'll update the contact information on file for your account.",
 };
 
-// DEMO_THESIS.md Use case 3, customer side (gate G3) — "Activate this
-// card?" copy the task spec calls for. ApprovalCard's Approve/Decline
-// buttons are the shared component's own fixed labels (components/registry/
-// approval-card.tsx, outside this build's Wave 2 file ownership) — this
-// title/description pair is what actually carries the "Activate this card?"
-// framing on screen.
+// DEMO_THESIS.md Use case 3, customer side (gate G3) — "the agent presents an
+// **Activate / Cancel** prompt". The title/description carry the framing; the
+// two button labels are the thesis's own words, passed through ApprovalCard's
+// optional `approveLabel`/`declineLabel` props (added on branch demo-aug4 —
+// components/registry/approval-card.tsx's header for why they are component
+// props and not schema fields). This is a customer confirming their own card,
+// not an ops user approving an action, so "Approve/Decline" would be the wrong
+// register: the shared gate machinery is unchanged, only the words are.
 const ACTIVATE_CARD_COPY = {
   title: "Activate this card?",
   description: "We'll run your card through the account's activation policy checks right now.",
+  approveLabel: "Activate",
+  declineLabel: "Cancel",
 };
 
 /** Labels of any renderEvidence parts already rendered earlier in THIS
@@ -265,6 +269,8 @@ function ActivateCardPart({
           description={ACTIVATE_CARD_COPY.description}
           rationale={readStringField(part.input, "rationale")}
           evidence={evidence}
+          approveLabel={ACTIVATE_CARD_COPY.approveLabel}
+          declineLabel={ACTIVATE_CARD_COPY.declineLabel}
           onApprove={() => onApprove(part.approval.id)}
           onDecline={() => onDecline(part.approval.id)}
         />

@@ -19,6 +19,17 @@
 // identity-pinning guarantee. `buildBeats()`'s coverage summary states this
 // split explicitly on every run.
 //
+// demo-aug4 scope (beats 15–26, the branch's own demo — DEMO_THESIS.md's
+// three use cases): the servicing-microservice endpoints every beat of that
+// demo runs on — /api/rules, /api/violations for both policies,
+// /api/remediate, /api/report, /api/cards/activate, /api/reset — driven in
+// the presenter's order, with the golden figures the demo puts on a
+// projector. What those beats do NOT drive is the chat surfaces themselves:
+// /ops and /servicing are client-side conversations, so chip clicks, the file
+// picker, the approval cards, and the dashboard drill-down have no HTTP
+// transcript to replay here. buildBeats()'s coverage summary states that
+// split too, and DEMO_RUNBOOK.md is the click-through that covers it.
+//
 // Every wire shape asserted below (request body, UIMessageChunk framing,
 // tool-part state machine, approval-response shape) was verified directly
 // against the installed `ai@7.0.35` / `@ai-sdk/react@4.0.38` dist sources
@@ -217,6 +228,110 @@ const SENTINEL_RENDER_MARKERS = [
 const SENTINEL_REAL_SCENARIO_MARKER = 'Find me all the authorized user policy exceptions';
 const SENTINEL_ERROR_BOUNDARY_MARKER = 'This screen hit an error';
 const SENTINEL_REHEARSAL_MARKER = 'Graph rehearsal loop';
+
+// ---------------------------------------------------------------------------
+// demo-aug4 constants — the policy demo (DEMO_THESIS.md's three use cases).
+// Same "read from source, not guessed" discipline as every constant above:
+// each figure below is one a pinned vitest suite already freezes
+// (app/api/violations/route.test.ts, lib/rules/evaluators.test.ts,
+// app/api/report/route.test.ts, app/api/cards/activate/route.test.ts), and
+// each rule payload is the checked-in policy fixture
+// (lib/sentinel/policy.ts, lib/sentinel/card-activation-policy.ts) flattened
+// exactly the way lib/agents/ops/resolvers.ts's `candidateRules()` flattens
+// it for the rule store. Written out as literals for the same reason the
+// trigger StreamEvents above are: this is plain Node with no TypeScript
+// loader (frozen deps, no ts-node/tsx), so it cannot import those modules —
+// and an HTTP verifier that fetched its own expectations from the code under
+// test would not be verifying anything.
+// ---------------------------------------------------------------------------
+
+const AU_POLICY = 'authorized-user';
+const CA_POLICY = 'card-activation';
+
+/** The `agentId` this script's policy-demo writes are attributed to. The
+ * remediate handler's zod refinement accepts `sentinel*` or exactly `ops`
+ * (app/api/sentinel/remediate/route.ts), and the ops chat's own
+ * `executeBatchRemoval` uses `ops` — so this is the id an external partner
+ * POSTing to /api/remediate would use too. */
+const OPS_AGENT_ID = 'ops';
+
+/** Gate 1's payload for use case 1 — the three AU rules a human approves.
+ * Byte-for-byte the rows lib/agents/ops/resolvers.ts stores after the
+ * presenter clicks Approve (titles, requirement sentences, `Document ·
+ * §Section` citations, flattened machine footers). `addedAt` is pinned so a
+ * replay stores an identical rule set every time. */
+const AU_RULES = [
+  {
+    id: 'R1',
+    title: 'R1 — Product Eligibility',
+    requirement:
+      'An authorized user may not be added to, or maintained on, a secured card account.',
+    citation: 'Authorized User Eligibility Policy · §Product Eligibility',
+    machine: 'R1 · accounts, account-party-roles · nightly sweep · current state',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+  {
+    id: 'R2',
+    title: 'R2 — Account Standing',
+    requirement:
+      'An authorized user may not be added to an account that is not in good standing at the time of addition.',
+    citation: 'Authorized User Eligibility Policy · §Account Standing',
+    machine: 'R2 · accounts, payments, account-party-roles · nightly sweep · at date of addition',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+  {
+    id: 'R3',
+    title: 'R3 — Authorized User Qualification',
+    requirement: 'An authorized user must be at least 16 years of age at the time of addition.',
+    citation: 'Authorized User Eligibility Policy · §Authorized User Qualification',
+    machine: 'R3 · parties, account-party-roles · nightly sweep · at date of addition',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+];
+
+/** Gate 1's payload for use case 3's ops side — same shape, other document. */
+const CA_RULES = [
+  {
+    id: 'CA-R1',
+    title: 'CA-R1 — Activation While Past-Due',
+    requirement: 'A card may not be activated while the account is past-due.',
+    citation: 'Card Activation Servicing Policy · §Activation While Past-Due',
+    machine:
+      'CA-R1 · card-activations, payments · at activation attempt · payment-derived past-due state',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+  {
+    id: 'CA-R2',
+    title: 'CA-R2 — 45-Day Activation Window',
+    requirement: 'Cards must be activated within 45 days of issuance.',
+    citation: 'Card Activation Servicing Policy · §Activation Window',
+    machine: 'CA-R2 · card-activations · nightly sweep · issuedDate/activatedDate elapsed window',
+    addedAt: '2026-07-31T09:00:00.000Z',
+  },
+];
+
+// The golden figures on screen during the demo. AU: 962 relationships swept,
+// 87 exceptions across 74 accounts, 61/19/7 by rule (lib/rules/evaluators.test.ts;
+// AU_EXCEPTIONS_TOTAL/AU_ACCOUNTS_AFFECTED above are the same 87/74, declared
+// for the Sentinel beats). CA: 214 issued cards swept, 41 exceptions across 41
+// accounts, 12 CA-R1 + 29 CA-R2 (app/api/violations/route.test.ts).
+const AU_SCANNED = 962;
+const AU_BY_RULE = [
+  ['R1', 61],
+  ['R2', 19],
+  ['R3', 7],
+];
+const CA_SCANNED = 214;
+const CA_EXCEPTIONS = 41;
+const CA_ACCOUNTS_AFFECTED = 41;
+const CA_BY_RULE = [
+  ['CA-R1', 12],
+  ['CA-R2', 29],
+];
+
+/** GET /api/violations's honest empty-store answer (lib/rules/query.ts's
+ * NO_RULES_ERROR) — the reason the upload/approve beat has to run first. */
+const NO_RULES_ERROR = 'no rules configured';
 
 // Servicing's four read-only evidence kinds (brief §7b / wire-contract §10.3),
 // in the table's own order.
@@ -1052,6 +1167,371 @@ async function beatServicingResetRestoresContact() {
 }
 
 // ---------------------------------------------------------------------------
+// Policy-demo beats (branch demo-aug4) — DEMO_THESIS.md's three use cases at
+// the wire level, in the order the presenter drives them.
+//
+// What these cover is the servicing-microservice seam the whole demo rests on
+// (DEMO_THESIS.md's endpoint checklist; DEMO_BUILD_PLAN.md D3 — "the HTTP
+// routes are thin wrappers over the *same* functions" the agent tools call).
+// Every one of these routes is the real thing an external partner integrates
+// against, and every figure they return is the figure on screen.
+//
+// What they deliberately do NOT cover: the chat surfaces' own scripted turns.
+// /ops and /servicing are React conversations driven by useChat — the chip
+// clicks, the file picker, the two approval cards, the unprompted
+// recommendation, the dashboard's drill-down accordion, the report download
+// button. Those are browser-side interactions with no HTTP transcript this
+// harness can replay (the agent STREAM is covered — beats 11–14 already drive
+// the servicing agent's, and lib/agents/ops/script.test.ts + events.test.ts
+// drive the ops agent's in process). buildBeats()'s coverage summary says so
+// out loud, because a verifier that implies it clicked through the demo when
+// it only checked the endpoints is worse than one that admits the split.
+// ---------------------------------------------------------------------------
+
+/** Every rule currently in the store for one policy, by id. */
+async function storedRuleIds(policyId) {
+  const res = await fetchJson(`/api/rules?policyId=${encodeURIComponent(policyId)}`);
+  assertTrue(res.ok, `GET /api/rules?policyId=${policyId} returned ${res.status}`);
+  assertTrue(Array.isArray(res.json?.rules), 'GET /api/rules did not return a "rules" array');
+  return res.json.rules.map((rule) => rule.id);
+}
+
+/** Asserts GET /api/violations?policy=… is the 409 "no rules configured"
+ * answer — a real state, not a staged one: the rule store starts empty and
+ * POST /api/reset returns it there. */
+async function assertNoRules(policyId) {
+  const res = await fetchJson(`/api/violations?policy=${encodeURIComponent(policyId)}`);
+  assertTrue(
+    res.status === 409,
+    `GET /api/violations?policy=${policyId} returned ${res.status}, expected 409 with no rules stored`,
+  );
+  assertTrue(
+    res.json?.error === NO_RULES_ERROR,
+    `GET /api/violations?policy=${policyId}'s 409 body was ${JSON.stringify(res.json)}, expected { error: "${NO_RULES_ERROR}" }`,
+  );
+}
+
+/** POSTs one policy's approved rules (Gate 1's side effect) and asserts the
+ * store and the Event Log both took them. */
+async function saveRulesBeat(policyId, rules, runId) {
+  const res = await fetchJson('/api/rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ policyId, rules, runId, agentId: OPS_AGENT_ID }),
+  });
+  assertTrue(res.ok, `POST /api/rules (${policyId}) returned ${res.status}: ${JSON.stringify(res.json)}`);
+  assertTrue(
+    res.json?.saved === rules.length,
+    `POST /api/rules (${policyId}) reported saved=${res.json?.saved}, expected ${rules.length}`,
+  );
+
+  const ids = await storedRuleIds(policyId);
+  const expectedIds = rules.map((rule) => rule.id);
+  assertTrue(
+    JSON.stringify(ids) === JSON.stringify(expectedIds),
+    `GET /api/rules?policyId=${policyId} returned [${ids.join(', ')}], expected [${expectedIds.join(', ')}] in approval order`,
+  );
+
+  const eventsRes = await fetchJson('/api/events');
+  const logged = eventsRes.json.entries.find(
+    (e) => e.runId === runId && e.kind === 'action.executed' && e.toolName === 'rules.save',
+  );
+  assertTrue(
+    logged,
+    `no kind:'action.executed' toolName:'rules.save' entry landed for the ${policyId} approval (runId "${runId}")`,
+  );
+}
+
+/** Beat: the policy demo's opening state — reset, then an empty rule store. */
+async function beatPolicyReset() {
+  const res = await fetchJson('/api/reset', { method: 'POST' });
+  assertTrue(res.ok && res.json?.ok === true, 'POST /api/reset (policy demo) did not return {ok:true}');
+
+  const all = await fetchJson('/api/rules');
+  assertTrue(all.ok, `GET /api/rules returned ${all.status}`);
+  assertTrue(
+    Array.isArray(all.json?.rules) && all.json.rules.length === 0,
+    `GET /api/rules returned ${all.json?.rules?.length} rule(s) immediately after reset, expected 0 — "no rules configured" is the demo's true opening state`,
+  );
+}
+
+/** Beat: GET /api/violations?policy=authorized-user 409s before Gate 1. */
+async function beatAuNoRulesYet() {
+  await assertNoRules(AU_POLICY);
+}
+
+/** Beat: Gate 1 for use case 1 — POST /api/rules stores R1/R2/R3. */
+async function beatSaveAuRules(policyState) {
+  policyState.auRulesRunId = `run-replay-ops-rules-au-${Date.now()}`;
+  await saveRulesBeat(AU_POLICY, AU_RULES, policyState.auRulesRunId);
+}
+
+/** Beat: the sweep (use case 1 beat 4) — the golden AU figures, the per-rule
+ * breakdown, and the drill-down facts the click-into interaction reads
+ * client-side (DEMO_BUILD_PLAN.md: "rows[].detail carries everything
+ * drill-down needs — no second fetch, no model involvement"). */
+async function beatAuViolations() {
+  const res = await fetchJson(`/api/violations?policy=${AU_POLICY}`);
+  assertTrue(res.status === 200, `GET /api/violations?policy=${AU_POLICY} returned ${res.status}`);
+
+  const payload = res.json;
+  assertTrue(payload.policyId === AU_POLICY, `violations payload policyId was "${payload.policyId}"`);
+  assertTrue(
+    payload.summary?.scanned === AU_SCANNED &&
+      payload.summary?.exceptions === AU_EXCEPTIONS_TOTAL &&
+      payload.summary?.accountsAffected === AU_ACCOUNTS_AFFECTED,
+    `AU summary was ${JSON.stringify(payload.summary)}, expected { scanned: ${AU_SCANNED}, accountsAffected: ${AU_ACCOUNTS_AFFECTED}, exceptions: ${AU_EXCEPTIONS_TOTAL} }`,
+  );
+
+  const byRule = payload.byRule.map((rule) => [rule.ruleId, rule.count]);
+  assertTrue(
+    JSON.stringify(byRule) === JSON.stringify(AU_BY_RULE),
+    `AU byRule was ${JSON.stringify(byRule)}, expected ${JSON.stringify(AU_BY_RULE)} in stored-rule order`,
+  );
+  assertTrue(
+    payload.rows.length === AU_EXCEPTIONS_TOTAL,
+    `AU payload carried ${payload.rows.length} rows, expected all ${AU_EXCEPTIONS_TOTAL} (the endpoint returns the full set; the dashboard samples it client-side)`,
+  );
+  assertTrue(
+    new Set(payload.rows.map((row) => row.accountId)).size === AU_ACCOUNTS_AFFECTED,
+    `AU rows covered ${new Set(payload.rows.map((row) => row.accountId)).size} distinct accounts, expected ${AU_ACCOUNTS_AFFECTED}`,
+  );
+
+  const rowMissingDetail = payload.rows.find(
+    (row) => !Array.isArray(row.detail) || row.detail.length === 0 || !row.finding,
+  );
+  assertTrue(
+    !rowMissingDetail,
+    `an AU row arrived without a finding sentence or drill-down detail: ${JSON.stringify(rowMissingDetail)}`,
+  );
+  console.log(
+    `  ${AU_SCANNED} swept · ${AU_EXCEPTIONS_TOTAL} exceptions · ${AU_ACCOUNTS_AFFECTED} accounts · ${AU_BY_RULE.map(([id, n]) => `${id}:${n}`).join(' ')}`,
+  );
+}
+
+/** Beat: Gate 2's side effect over the demo's own path. `/api/remediate` is a
+ * re-export of the Sentinel handler, so this also proves the two URLs really
+ * are one implementation: the confirmationId must match the one beat 8 got
+ * from /api/sentinel/remediate. */
+async function beatOpsRemediate(policyState, sentinelState) {
+  const runId = `run-replay-ops-remediate-${Date.now()}`;
+  const res = await fetchJson('/api/remediate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runId, agentId: OPS_AGENT_ID }),
+  });
+  assertTrue(res.status === 200, `POST /api/remediate returned ${res.status}: ${JSON.stringify(res.json)}`);
+
+  const payload = res.json;
+  assertTrue(payload.status === 'executed', `remediate status was "${payload.status}", expected "executed"`);
+  assertTrue(
+    payload.removed === AU_EXCEPTIONS_TOTAL &&
+      payload.accountsTouched === AU_ACCOUNTS_AFFECTED &&
+      payload.notificationsQueued === AU_ACCOUNTS_AFFECTED,
+    `remediate counters were ${payload.removed}/${payload.accountsTouched}/${payload.notificationsQueued}, expected ${AU_EXCEPTIONS_TOTAL}/${AU_ACCOUNTS_AFFECTED}/${AU_ACCOUNTS_AFFECTED}`,
+  );
+  assertTrue(
+    typeof payload.confirmationId === 'string' && payload.confirmationId.startsWith('rem-'),
+    `remediate confirmationId was "${payload.confirmationId}", expected it to start with "rem-"`,
+  );
+  if (sentinelState.reportId) {
+    assertTrue(
+      payload.confirmationId === `rem-${sentinelState.reportId}`,
+      `POST /api/remediate returned "${payload.confirmationId}" but POST /api/sentinel/remediate returned "rem-${sentinelState.reportId}" — the two paths must resolve to the SAME handler, not two copies`,
+    );
+  }
+
+  const eventsRes = await fetchJson('/api/events');
+  const logged = eventsRes.json.entries.find(
+    (e) => e.runId === runId && e.kind === 'action.executed' && e.toolName === 'au-policy.remediate',
+  );
+  assertTrue(logged, `no 'au-policy.remediate' action.executed entry landed for runId "${runId}"`);
+
+  policyState.confirmationId = payload.confirmationId;
+  console.log(`  confirmationId ${payload.confirmationId} — kicked off in batch (mock execution)`);
+}
+
+/** Beat: use case 1 beat 8 — the downloadable audit report. Every exception is
+ * enumerated (one header <tr> plus 87 data rows, app/api/report/route.test.ts's
+ * own oracle) and the approved batch's confirmationId is printed on it. */
+async function beatAuReport(policyState) {
+  assertTrue(policyState.confirmationId, 'beatAuReport ran before a confirmationId was captured');
+
+  const res = await fetchRaw(
+    `/api/report?policy=${AU_POLICY}&confirmationId=${encodeURIComponent(policyState.confirmationId)}`,
+  );
+  assertTrue(res.status === 200, `GET /api/report?policy=${AU_POLICY} returned ${res.status}`);
+  assertTrue(
+    (res.headers.get('content-type') ?? '').includes('text/html'),
+    `GET /api/report's Content-Type was "${res.headers.get('content-type')}", expected text/html`,
+  );
+  const disposition = res.headers.get('content-disposition') ?? '';
+  assertTrue(
+    disposition.includes('attachment'),
+    `GET /api/report's Content-Disposition did not carry "attachment" (got "${disposition}")`,
+  );
+
+  const trCount = (res.text.match(/<tr/g) ?? []).length;
+  assertTrue(
+    trCount === AU_EXCEPTIONS_TOTAL + 1,
+    `GET /api/report carried ${trCount} <tr> elements, expected ${AU_EXCEPTIONS_TOTAL + 1} (one header row plus all ${AU_EXCEPTIONS_TOTAL} exceptions, never a slice)`,
+  );
+  assertTrue(
+    res.text.includes(policyState.confirmationId),
+    `GET /api/report's HTML does not print the approved batch's confirmationId "${policyState.confirmationId}"`,
+  );
+  for (const figure of [String(AU_SCANNED), String(AU_EXCEPTIONS_TOTAL), String(AU_ACCOUNTS_AFFECTED)]) {
+    assertTrue(res.text.includes(figure), `GET /api/report's HTML does not carry the headline figure ${figure}`);
+  }
+}
+
+/** Beat: the card-activation report is honestly unbuilt — 501, not a fake
+ * file and not a 400 (the policy id itself is well-formed). */
+async function beatCaReportNotBuilt() {
+  const res = await fetchJson(`/api/report?policy=${CA_POLICY}`);
+  assertTrue(
+    res.status === 501,
+    `GET /api/report?policy=${CA_POLICY} returned ${res.status}, expected 501 (only the authorized-user report is built)`,
+  );
+  assertTrue(
+    typeof res.json?.error === 'string' && res.json.error.length > 0,
+    `GET /api/report?policy=${CA_POLICY}'s 501 body carried no error sentence: ${JSON.stringify(res.json)}`,
+  );
+}
+
+/** Beat: Gate 1 for use case 3's ops side — CA-R1/CA-R2, alongside the AU
+ * rules already stored. */
+async function beatSaveCaRules(policyState) {
+  policyState.caRulesRunId = `run-replay-ops-rules-ca-${Date.now()}`;
+  await saveRulesBeat(CA_POLICY, CA_RULES, policyState.caRulesRunId);
+
+  const auIds = await storedRuleIds(AU_POLICY);
+  assertTrue(
+    auIds.length === AU_RULES.length,
+    `storing the card-activation rules disturbed the authorized-user store (${auIds.length} rules left, expected ${AU_RULES.length})`,
+  );
+}
+
+/** Beat: the card-activation sweep against the event logs (use case 3, ops
+ * side) — 214 issued cards, 41 exceptions, 12 CA-R1 + 29 CA-R2. */
+async function beatCaViolations() {
+  const res = await fetchJson(`/api/violations?policy=${CA_POLICY}`);
+  assertTrue(res.status === 200, `GET /api/violations?policy=${CA_POLICY} returned ${res.status}`);
+
+  const payload = res.json;
+  assertTrue(
+    payload.summary?.scanned === CA_SCANNED &&
+      payload.summary?.exceptions === CA_EXCEPTIONS &&
+      payload.summary?.accountsAffected === CA_ACCOUNTS_AFFECTED,
+    `CA summary was ${JSON.stringify(payload.summary)}, expected { scanned: ${CA_SCANNED}, accountsAffected: ${CA_ACCOUNTS_AFFECTED}, exceptions: ${CA_EXCEPTIONS} }`,
+  );
+  const byRule = payload.byRule.map((rule) => [rule.ruleId, rule.count]);
+  assertTrue(
+    JSON.stringify(byRule) === JSON.stringify(CA_BY_RULE),
+    `CA byRule was ${JSON.stringify(byRule)}, expected ${JSON.stringify(CA_BY_RULE)}`,
+  );
+  assertTrue(
+    payload.rows.length === CA_EXCEPTIONS,
+    `CA payload carried ${payload.rows.length} rows, expected ${CA_EXCEPTIONS}`,
+  );
+
+  // Both policies stay live at once: approving CA rules must not re-scope the
+  // AU sweep the audience just looked at.
+  const au = await fetchJson(`/api/violations?policy=${AU_POLICY}`);
+  assertTrue(
+    au.status === 200 && au.json.summary.exceptions === AU_EXCEPTIONS_TOTAL,
+    `the authorized-user sweep changed after the card-activation rules were stored (${au.status}, ${au.json?.summary?.exceptions} exceptions)`,
+  );
+  console.log(
+    `  ${CA_SCANNED} swept · ${CA_EXCEPTIONS} exceptions · ${CA_BY_RULE.map(([id, n]) => `${id}:${n}`).join(' ')}`,
+  );
+}
+
+/** Beat: use case 3's customer side, happy path — Patel's card activates, with
+ * a deterministic `act-…` confirmation id (byte-identical on a second call, so
+ * a re-run mid-demo shows the same receipt). */
+async function beatCardActivateHappy() {
+  const runId = `run-replay-activate-happy-${Date.now()}`;
+  const options = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ persona: 'happy', runId, agentId: 'servicing-card-activation' }),
+  };
+
+  const first = await fetchRaw('/api/cards/activate', options);
+  const second = await fetchRaw('/api/cards/activate', options);
+  assertTrue(first.status === 200, `POST /api/cards/activate (happy) returned ${first.status}`);
+  assertTrue(
+    first.text === second.text,
+    `POST /api/cards/activate (happy) was NOT byte-identical across two calls:\n  1st: ${first.text}\n  2nd: ${second.text}`,
+  );
+
+  const payload = JSON.parse(first.text);
+  assertTrue(
+    payload.status === 'activated',
+    `happy-path activation returned status "${payload.status}", expected "activated" (Patel's account is clean at both demo anchors)`,
+  );
+  assertTrue(
+    /^act-.+-\d{8}$/.test(payload.confirmationId ?? ''),
+    `happy-path confirmationId was "${payload.confirmationId}", expected the deterministic "act-<cardId>-<YYYYMMDD>" shape`,
+  );
+
+  const eventsRes = await fetchJson('/api/events');
+  const logged = eventsRes.json.entries.find(
+    (e) => e.runId === runId && e.kind === 'action.executed' && e.toolName === 'card-activation.activate',
+  );
+  assertTrue(logged, `no 'card-activation.activate' entry landed for runId "${runId}"`);
+  console.log(`  confirmationId ${payload.confirmationId}`);
+}
+
+/** Beat: use case 3's customer side, fail path — the card arrived, and the
+ * account still fails CA-R1. The block is the policy check's own answer, not a
+ * per-persona literal. */
+async function beatCardActivateBlocked() {
+  const runId = `run-replay-activate-blocked-${Date.now()}`;
+  const res = await fetchJson('/api/cards/activate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ persona: 'blocked', runId, agentId: 'servicing-card-activation' }),
+  });
+  assertTrue(res.status === 200, `POST /api/cards/activate (blocked) returned ${res.status}`);
+  assertTrue(
+    res.json?.status === 'blocked',
+    `blocked-path activation returned status "${res.json?.status}", expected "blocked" (Marcus's missed payment leaves him past-due)`,
+  );
+  assertTrue(
+    res.json.ruleId === 'CA-R1',
+    `blocked-path activation cited "${res.json.ruleId}", expected "CA-R1" (Activation While Past-Due)`,
+  );
+  assertTrue(
+    typeof res.json.finding === 'string' && /past-due/.test(res.json.finding),
+    `blocked-path finding did not name the past-due state: "${res.json.finding}"`,
+  );
+  assertTrue(
+    res.json.confirmationId === undefined,
+    `a blocked activation returned a confirmationId ("${res.json.confirmationId}") — nothing was activated, so nothing should be confirmed`,
+  );
+  console.log(`  blocked · CA-R1 · ${res.json.finding}`);
+}
+
+/** Beat: the demo resets to its opening state — both policies back to 409, the
+ * rule store empty, so the next rehearsal plays the upload → approve → sweep
+ * beat exactly as the first one did. */
+async function beatPolicyResetRestoresEmptyStore() {
+  const res = await fetchJson('/api/reset', { method: 'POST' });
+  assertTrue(res.ok && res.json?.ok === true, 'POST /api/reset (closing) did not return {ok:true}');
+
+  await assertNoRules(AU_POLICY);
+  await assertNoRules(CA_POLICY);
+
+  const all = await fetchJson('/api/rules');
+  assertTrue(
+    Array.isArray(all.json?.rules) && all.json.rules.length === 0,
+    `GET /api/rules still returned ${all.json?.rules?.length} rule(s) after the closing reset, expected 0`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Server detection / self-start
 // ---------------------------------------------------------------------------
 
@@ -1126,7 +1606,7 @@ async function withTimeout(promise, ms, label) {
   }
 }
 
-function buildBeats(triggers, runIds, sentinelState, servicingReads) {
+function buildBeats(triggers, runIds, sentinelState, servicingReads, policyState) {
   return [
     ['Beat 0 — reset to opening state', () => beatReset()],
     ['Beat 0 — Command Center shows all three agents', () => beatDashboard()],
@@ -1224,6 +1704,22 @@ function buildBeats(triggers, runIds, sentinelState, servicingReads) {
         );
       },
     ],
+    // ---- demo-aug4 policy demo (DEMO_THESIS.md's three use cases) — the
+    // servicing-microservice seam, driven in the presenter's own order. See
+    // the section header above these beats' definitions, and the coverage
+    // summary below, for the chat-surface boundary these deliberately stop at.
+    ['Beat 15 — POST /api/reset opens the policy demo with an empty rule store', () => beatPolicyReset()],
+    ['Beat 16 — GET /api/violations?policy=authorized-user is 409 before any rule is approved', () => beatAuNoRulesYet()],
+    ['Beat 17 — Gate 1: POST /api/rules stores R1/R2/R3', () => beatSaveAuRules(policyState)],
+    ['Beat 18 — GET /api/violations?policy=authorized-user returns 962 · 87 · 74 (61/19/7)', () => beatAuViolations()],
+    ['Beat 19 — Gate 2: POST /api/remediate kicks off the batch on the ops path', () => beatOpsRemediate(policyState, sentinelState)],
+    ['Beat 20 — GET /api/report downloads the 87-row audit report carrying the confirmationId', () => beatAuReport(policyState)],
+    ['Beat 21 — GET /api/report?policy=card-activation is an honest 501', () => beatCaReportNotBuilt()],
+    ['Beat 22 — Gate 1 (use case 3): POST /api/rules stores CA-R1/CA-R2', () => beatSaveCaRules(policyState)],
+    ['Beat 23 — GET /api/violations?policy=card-activation returns 214 · 41 · 41 (12/29)', () => beatCaViolations()],
+    ['Beat 24 — POST /api/cards/activate (happy) activates with a deterministic act-… id', () => beatCardActivateHappy()],
+    ['Beat 25 — POST /api/cards/activate (blocked) blocks on CA-R1', () => beatCardActivateBlocked()],
+    ['Beat 26 — POST /api/reset returns both policies to 409 (no rules configured)', () => beatPolicyResetRestoresEmptyStore()],
   ];
 }
 
@@ -1260,6 +1756,26 @@ function printCoverageSummary() {
   console.log('  itself — the app exposes no read surface for contact fields (no §7b evidence kind');
   console.log('  shows phone/mailingAddress), so that reversion can only be proven by a direct');
   console.log('  import — lib/soe/adapter.test.ts does exactly that (`npm run test`).');
+  console.log('  demo-aug4 policy demo (beats 15–26): the servicing-microservice seam all three');
+  console.log('  use cases run on, in presenter order — reset to an empty rule store; the honest');
+  console.log('  409 "no rules configured" before Gate 1; POST /api/rules for R1/R2/R3 and for');
+  console.log('  CA-R1/CA-R2, each landing an Event Log entry; the AU sweep\'s golden 962/87/74 and');
+  console.log('  61/19/7 with a finding sentence + drill-down detail on every row; POST');
+  console.log('  /api/remediate on the ops path returning the SAME confirmationId the Sentinel path');
+  console.log('  does (one handler, two URLs); GET /api/report\'s 87-row HTML attachment carrying');
+  console.log('  that confirmationId, and its honest 501 for the unbuilt card-activation report;');
+  console.log('  the card-activation sweep\'s 214/41/41 and 12/29 with the AU sweep unaffected;');
+  console.log('  both activation personas (happy → deterministic act-… id, blocked → CA-R1 with a');
+  console.log('  past-due finding and no confirmation id); and a closing reset that puts both');
+  console.log('  policies back to 409 so the next rehearsal opens identical to this one.');
+  console.log('  NOT covered here, by design: the /ops and /servicing chat surfaces\' own scripted');
+  console.log('  conversations — chip clicks, the policy-document file picker, the two approval');
+  console.log('  cards, the unprompted remediation recommendation, the dashboard drill-down, and');
+  console.log('  the report download button. Those are client-side interactions with no HTTP');
+  console.log('  transcript to replay; the ops agent\'s scripted turns and its Event Log coverage');
+  console.log('  are proven in process by lib/agents/ops/script.test.ts and events.test.ts, and the');
+  console.log('  servicing agent\'s whole stream IS driven here (beats 11–14). Everything a');
+  console.log('  presenter clicks still has to be clicked once — see DEMO_RUNBOOK.md.');
 }
 
 async function main() {
@@ -1273,7 +1789,8 @@ async function main() {
     const runIds = {};
     const sentinelState = {};
     const servicingReads = {};
-    const beats = buildBeats(triggers, runIds, sentinelState, servicingReads);
+    const policyState = {};
+    const beats = buildBeats(triggers, runIds, sentinelState, servicingReads, policyState);
 
     let failures = 0;
     for (const [name, fn] of beats) {

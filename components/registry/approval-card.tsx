@@ -12,6 +12,29 @@
 // is a collapsed disclosure so the presenter can see what they're approving
 // before approving it. Both are pure presentation of preformatted strings
 // — this component still fetches nothing and computes nothing.
+//
+// demo-aug4 addition: `approveLabel`/`declineLabel`. DEMO_THESIS.md use case
+// 3's customer-side gate is an "Activate / Cancel" prompt, not an ops
+// approval — same machinery, different words (DEMO_BUILD_PLAN.md: "Activation
+// Activate/Cancel and both batch gates reuse the existing ApprovalCard...
+// same machinery, different labels. No new gate UI"). Both default to the
+// strings this card has always rendered, so every existing caller
+// (components/run-view/approval-rail.tsx, components/sentinel/context-rail.tsx,
+// components/ops/ops-assistant-parts.tsx, and the contact-change gate in
+// components/servicing/servicing-assistant-parts.tsx) is byte-identical.
+//
+// These two are caller-supplied COPY, so they live on this component's own
+// props type alongside `disabled`/`decision` rather than in
+// `approvalCardPropsSchema` — nothing wire-borne carries them. ApprovalCard is
+// a registry member that is deliberately NOT evidence-routed (components/
+// registry/index.tsx: it "renders from action-tool parts / approval state,
+// never from renderEvidence output"), so no server payload validated by that
+// schema ever reaches this file; every call site passes React props directly.
+//
+// The resolved-decision chip below still reads "Approved"/"Declined"
+// regardless: it is a record of what a human did at a gate, in the Event
+// Log's own vocabulary (kind: 'approval.granted' / 'approval.denied',
+// CLAUDE.md 5e), not a second copy of the button's call to action.
 
 import { ChevronDown, CircleCheck, CircleX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +51,10 @@ type Props = ApprovalCardProps & {
   onDecline: () => void;
   disabled?: boolean;
   decision?: "approved" | "denied";
+  /** Affirmative button copy. Defaults to "Approve" (module header). */
+  approveLabel?: string;
+  /** Negative button copy. Defaults to "Decline" (module header). */
+  declineLabel?: string;
 };
 
 export function ApprovalCard({
@@ -42,6 +69,8 @@ export function ApprovalCard({
   onDecline,
   disabled = false,
   decision,
+  approveLabel = "Approve",
+  declineLabel = "Decline",
 }: Props) {
   return (
     <div className="rounded-xl border-2 border-primary/40 bg-card p-5 ring-1 ring-foreground/5">
@@ -138,7 +167,7 @@ export function ApprovalCard({
         ) : (
           <>
             <Button size="lg" onClick={onApprove} disabled={disabled}>
-              Approve
+              {approveLabel}
             </Button>
             <Button
               size="lg"
@@ -147,7 +176,7 @@ export function ApprovalCard({
               onClick={onDecline}
               disabled={disabled}
             >
-              Decline
+              {declineLabel}
             </Button>
           </>
         )}
