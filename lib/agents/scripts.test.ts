@@ -33,6 +33,8 @@ import { sendRetentionOutreach } from './bt-lifecycle/tools';
 import { auGrowthScript } from './au-growth/script';
 import { sendGraduationInvite } from './au-growth/tools';
 import { askScript } from './ask/script';
+import { servicingScript } from './servicing/script';
+import { updateContactInfo } from './servicing/tools';
 
 /** Every tool's `inputSchema` is declared as the AI SDK's `FlexibleSchema<T>`
  * union, which doesn't statically expose `.parse` — but `tool()` is the
@@ -546,6 +548,173 @@ describe.each(ANCHORS)('agent scripts @ anchor %s', (anchorIso) => {
       expect(secondStep.toolCalls).toHaveLength(1);
       expect(secondStep.toolCalls[0]?.toolName).toBe('renderEvidence');
       expect((secondStep.toolCalls[0]?.input as { component: string }).component).toBe('BarBreakdown');
+    });
+  });
+
+  describe('servicing — Anand Patel (pinned cardholder)', () => {
+    it('routes "latest transactions" to TransactionTable with a grounded takeaway', async () => {
+      const result = await driveScript(servicingScript, 'What are my latest transactions?');
+
+      expect(result.calls.map((c) => c.toolName)).toEqual(['renderEvidence']);
+      expect(result.calls[0]?.input).toMatchObject({
+        component: 'TransactionTable',
+        source: { kind: 'servicing-recent-transactions' },
+      });
+      expect(() => evidenceSpecSchema.parse(result.calls[0]?.input)).not.toThrow();
+
+      const closing = result.steps.at(-1);
+      expect(closing?.done).toBe(true);
+      expect(closing?.narration.length).toBeGreaterThan(0);
+
+      const { resolveEvidence } = await import('./servicing/resolvers');
+      const instruction = await resolveEvidence({
+        component: 'TransactionTable',
+        source: { kind: 'servicing-recent-transactions', months: 3, limit: 15 },
+      });
+      if (instruction.component !== 'TransactionTable') throw new Error('unreachable');
+      expect(closing?.narration).toBe(instruction.props.footnote);
+    });
+
+    it('routes "next payment due" to MetricRow with a grounded takeaway', async () => {
+      const result = await driveScript(servicingScript, 'When is my next payment due?');
+
+      expect(result.calls.map((c) => c.toolName)).toEqual(['renderEvidence']);
+      expect(result.calls[0]?.input).toMatchObject({
+        component: 'MetricRow',
+        source: { kind: 'servicing-next-payment' },
+      });
+
+      const { resolveEvidence } = await import('./servicing/resolvers');
+      const instruction = await resolveEvidence({
+        component: 'MetricRow',
+        source: { kind: 'servicing-next-payment' },
+      });
+      if (instruction.component !== 'MetricRow') throw new Error('unreachable');
+      const dueDate = instruction.props.metrics.find((m) => m.label === 'Due Date')?.value;
+      const amountDue = instruction.props.metrics.find((m) => m.label === 'Amount Due')?.value;
+
+      const closing = result.steps.at(-1);
+      expect(closing?.done).toBe(true);
+      expect(dueDate).toBeTruthy();
+      expect(amountDue).toBeTruthy();
+      if (dueDate) expect(closing?.narration).toContain(dueDate);
+      if (amountDue) expect(closing?.narration).toContain(amountDue);
+    });
+
+    it('routes "balance and available credit" to MetricRow with a grounded takeaway', async () => {
+      const result = await driveScript(servicingScript, "What's my balance and available credit?");
+
+      expect(result.calls.map((c) => c.toolName)).toEqual(['renderEvidence']);
+      expect(result.calls[0]?.input).toMatchObject({
+        component: 'MetricRow',
+        source: { kind: 'servicing-account-summary' },
+      });
+
+      const { resolveEvidence } = await import('./servicing/resolvers');
+      const instruction = await resolveEvidence({
+        component: 'MetricRow',
+        source: { kind: 'servicing-account-summary' },
+      });
+      if (instruction.component !== 'MetricRow') throw new Error('unreachable');
+      const balance = instruction.props.metrics.find((m) => m.label === 'Balance')?.value;
+
+      const closing = result.steps.at(-1);
+      expect(balance).toBeTruthy();
+      if (balance) expect(closing?.narration).toContain(balance);
+    });
+
+    it('routes "what am I spending on" to CategoryPie with a grounded takeaway', async () => {
+      const result = await driveScript(servicingScript, 'What am I spending on?');
+
+      expect(result.calls.map((c) => c.toolName)).toEqual(['renderEvidence']);
+      expect(result.calls[0]?.input).toMatchObject({
+        component: 'CategoryPie',
+        source: { kind: 'servicing-category-spend', months: 3 },
+      });
+
+      const { resolveEvidence } = await import('./servicing/resolvers');
+      const instruction = await resolveEvidence({
+        component: 'CategoryPie',
+        source: { kind: 'servicing-category-spend', months: 3 },
+      });
+      if (instruction.component !== 'CategoryPie') throw new Error('unreachable');
+      const top = instruction.props.slices[0];
+      const closing = result.steps.at(-1);
+      expect(top).toBeTruthy();
+      if (top) {
+        expect(closing?.narration).toContain(top.label);
+        expect(closing?.narration).toContain(top.share);
+      }
+    });
+
+    it('proposes updateContactInfo for a phone-number change, gates on approval, and confirms once approved', async () => {
+      const result = await driveScript(servicingScript, 'I need to update my phone number to 512-555-0199.');
+
+      expect(result.calls.map((c) => c.toolName)).toEqual(['updateContactInfo']);
+      expect(() => parseWithToolSchema(updateContactInfo.inputSchema, result.calls[0]?.input)).not.toThrow();
+      expect((result.calls[0]?.input as { phone?: string }).phone).toBe('512-555-0199');
+
+      const closing = result.steps.at(-1);
+      expect(closing?.done).toBe(true);
+      expect(closing?.narration).toContain('512-555-0199');
+    });
+
+    it('falls back to a concrete demo number when the customer names no specific one', async () => {
+      const result = await driveScript(servicingScript, 'I need to update my phone number.');
+      expect((result.calls[0]?.input as { phone?: string }).phone).toBeTruthy();
+      const closing = result.steps.at(-1);
+      expect(closing?.narration).toContain((result.calls[0]?.input as { phone: string }).phone);
+    });
+
+    it('closes with a truthful, unapplied sentence when the contact change is declined', async () => {
+      const result = await driveScript(
+        servicingScript,
+        'I need to update my phone number to 512-555-0199.',
+        () => 'denied',
+      );
+      const closing = result.steps.at(-1);
+      expect(closing?.done).toBe(true);
+      expect(closing?.narration.toLowerCase()).toContain('did not make that change');
+    });
+
+    it('names what it can show, with no tool calls, for an unmatched question', async () => {
+      const result = await driveScript(servicingScript, "What's the weather like today?");
+
+      expect(result.calls).toHaveLength(0);
+      expect(result.steps).toHaveLength(1);
+      expect(result.steps[0]?.done).toBe(true);
+      const narration = result.steps[0]?.narration.toLowerCase() ?? '';
+      expect(narration).toContain('transactions');
+      expect(narration).toContain('payment');
+    });
+
+    it('answers a second question in the same run independently of the first', async () => {
+      const promptSoFar: LanguageModelV4Message[] = [
+        userMessage('What are my latest transactions?'),
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'g0',
+              toolName: 'renderEvidence',
+              input: { component: 'TransactionTable', source: { kind: 'servicing-recent-transactions', months: 3, limit: 15 } },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [{ type: 'tool-result', toolCallId: 'g0', toolName: 'renderEvidence', output: { type: 'json', value: {} } }],
+        },
+        userMessage('When is my next payment due?'),
+      ];
+
+      const secondStep = await servicingScript.nextStep(promptSoFar as LanguageModelV4Prompt);
+      expect(secondStep.toolCalls).toHaveLength(1);
+      expect(secondStep.toolCalls[0]?.toolName).toBe('renderEvidence');
+      expect((secondStep.toolCalls[0]?.input as { source: { kind: string } }).source.kind).toBe(
+        'servicing-next-payment',
+      );
     });
   });
 });

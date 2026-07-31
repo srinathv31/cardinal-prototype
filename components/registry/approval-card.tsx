@@ -3,10 +3,47 @@
 // caller (the run view) to the AI SDK tool-approval response flow — this
 // component holds no approval logic itself, just renders the gate and calls
 // the provided handlers.
+//
+// v3 addition (CARDINAL_V3_AU_BRIEF.md §3 Act III beat 7, W3.3): `scope` and
+// `reviewList` are optional, additive props (lib/registry/schemas.ts) each
+// rendered behind its own presence check below — a v1 card that never sets
+// either is pixel-identical to before. `scope` states a bulk action's blast
+// radius structurally (not buried in `description`'s prose); `reviewList`
+// is a collapsed disclosure so the presenter can see what they're approving
+// before approving it. Both are pure presentation of preformatted strings
+// — this component still fetches nothing and computes nothing.
+//
+// demo-aug4 addition: `approveLabel`/`declineLabel`. DEMO_THESIS.md use case
+// 3's customer-side gate is an "Activate / Cancel" prompt, not an ops
+// approval — same machinery, different words (DEMO_BUILD_PLAN.md: "Activation
+// Activate/Cancel and both batch gates reuse the existing ApprovalCard...
+// same machinery, different labels. No new gate UI"). Both default to the
+// strings this card has always rendered, so every existing caller
+// (components/run-view/approval-rail.tsx, components/sentinel/context-rail.tsx,
+// components/ops/ops-assistant-parts.tsx, and the contact-change gate in
+// components/servicing/servicing-assistant-parts.tsx) is byte-identical.
+//
+// These two are caller-supplied COPY, so they live on this component's own
+// props type alongside `disabled`/`decision` rather than in
+// `approvalCardPropsSchema` — nothing wire-borne carries them. ApprovalCard is
+// a registry member that is deliberately NOT evidence-routed (components/
+// registry/index.tsx: it "renders from action-tool parts / approval state,
+// never from renderEvidence output"), so no server payload validated by that
+// schema ever reaches this file; every call site passes React props directly.
+//
+// The resolved-decision chip below still reads "Approved"/"Declined"
+// regardless: it is a record of what a human did at a gate, in the Event
+// Log's own vocabulary (kind: 'approval.granted' / 'approval.denied',
+// CLAUDE.md 5e), not a second copy of the button's call to action.
 
-import { CircleCheck, CircleX } from "lucide-react";
+import { ChevronDown, CircleCheck, CircleX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import type { ApprovalCardProps } from "@/lib/registry/schemas";
 
 type Props = ApprovalCardProps & {
@@ -14,6 +51,10 @@ type Props = ApprovalCardProps & {
   onDecline: () => void;
   disabled?: boolean;
   decision?: "approved" | "denied";
+  /** Affirmative button copy. Defaults to "Approve" (module header). */
+  approveLabel?: string;
+  /** Negative button copy. Defaults to "Decline" (module header). */
+  declineLabel?: string;
 };
 
 export function ApprovalCard({
@@ -22,10 +63,14 @@ export function ApprovalCard({
   description,
   rationale,
   evidence,
+  scope,
+  reviewList,
   onApprove,
   onDecline,
   disabled = false,
   decision,
+  approveLabel = "Approve",
+  declineLabel = "Decline",
 }: Props) {
   return (
     <div className="rounded-xl border-2 border-primary/40 bg-card p-5 ring-1 ring-foreground/5">
@@ -44,6 +89,55 @@ export function ApprovalCard({
         <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2.5 text-sm leading-relaxed text-foreground/90">
           {rationale}
         </p>
+      ) : null}
+
+      {scope ? (
+        <div className="mt-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+          <p className="text-base font-medium text-foreground">{scope.summary}</p>
+          {scope.counts && scope.counts.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {scope.counts.map((count, index) => (
+                <span
+                  key={`${count.label}-${index}`}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-sm text-foreground/90 ring-1 ring-border"
+                >
+                  <span className="text-muted-foreground">{count.label}</span>
+                  <span className="font-semibold tabular-nums">{count.value}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {reviewList ? (
+        <Collapsible className="mt-3">
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <ChevronDown className="size-3.5" />
+              {reviewList.label}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 flex flex-col divide-y divide-border rounded-lg border border-border">
+            {reviewList.rows.map((row, index) => (
+              <div
+                key={`${row.primary}-${row.secondary}-${index}`}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm font-medium text-foreground">{row.primary}</p>
+                  <p className="text-sm text-muted-foreground">{row.secondary}</p>
+                </div>
+                {row.detail ? (
+                  <span className="text-sm text-muted-foreground">{row.detail}</span>
+                ) : null}
+              </div>
+            ))}
+          </CollapsibleContent>
+          {reviewList.footnote ? (
+            <p className="mt-2 text-sm text-muted-foreground">{reviewList.footnote}</p>
+          ) : null}
+        </Collapsible>
       ) : null}
 
       {evidence.length > 0 ? (
@@ -73,7 +167,7 @@ export function ApprovalCard({
         ) : (
           <>
             <Button size="lg" onClick={onApprove} disabled={disabled}>
-              Approve
+              {approveLabel}
             </Button>
             <Button
               size="lg"
@@ -82,7 +176,7 @@ export function ApprovalCard({
               onClick={onDecline}
               disabled={disabled}
             >
-              Decline
+              {declineLabel}
             </Button>
           </>
         )}

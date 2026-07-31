@@ -3,18 +3,19 @@
 // Patel household (Beat 4), and six background accounts (Beat 5). Consumed
 // only by the adapter in lib/soe — nothing else imports from here.
 
+import { buildAuPortfolio, type AuPortfolio } from './au-portfolio';
 import { buildBackground } from './background';
+import { buildCardActivations } from './card-activation';
 import { buildElena } from './elena';
 import { buildMarcus } from './marcus';
 import { buildPatel } from './patel';
-import { buildSentinel } from './sentinel';
 import type {
   Account,
   AccountPartyRole,
   BalanceTransferEvent,
+  CardActivation,
   Party,
   Payment,
-  PromoNoticeRecord,
   StreamEvent,
   Transaction,
 } from '../types';
@@ -29,11 +30,16 @@ export interface SeedDb {
   payments: Payment[];
   balanceTransferEvents: BalanceTransferEvent[];
   streamEvents: StreamEvent[];
-  // v2 "Sentinel" additions (brief §5) — new collections only; never merged
-  // into the arrays above except Marcus's BT event (see below), which is the
-  // one deliberate, documented exception (v2-reuse-map.md §5 guardrail).
-  promoNotices: PromoNoticeRecord[];
-  sentinelReplayEvents: StreamEvent[];
+  /** v3 "AU policy" addition (brief §5d) — an additive collection, NEVER
+   * merged into the arrays above, so v1's nine-account arithmetic and its
+   * pinned tests stay frozen (docs/v3-migration-map.md §3). Consumed only
+   * through lib/soe/adapter.ts's getAuPortfolio / getAuScanPortfolio. */
+  auPortfolio: AuPortfolio;
+  /** v3 "card-activation policy" addition (DEMO_THESIS.md Use case 3;
+   * DEMO_BUILD_PLAN.md "Card-activation domain") — an additive collection,
+   * NEVER merged into the arrays above. Consumed only through
+   * lib/soe/adapter.ts's getCardActivations / getCardActivationScan. */
+  cardActivations: CardActivation[];
 }
 
 export function buildSeedDb(anchor: Date): SeedDb {
@@ -41,7 +47,8 @@ export function buildSeedDb(anchor: Date): SeedDb {
   const elena = buildElena(anchor);
   const patel = buildPatel(anchor);
   const background = buildBackground(anchor);
-  const sentinel = buildSentinel(anchor);
+  const auPortfolio = buildAuPortfolio(anchor);
+  const cardActivations = buildCardActivations(anchor, auPortfolio);
 
   return {
     parties: [
@@ -71,7 +78,6 @@ export function buildSeedDb(anchor: Date): SeedDb {
     balanceTransferEvents: [
       ...elena.btEvents,
       ...background.btEvents,
-      sentinel.btEvent,
     ],
     streamEvents: [
       ...marcus.streamEvents,
@@ -79,7 +85,7 @@ export function buildSeedDb(anchor: Date): SeedDb {
       ...patel.streamEvents,
       ...background.streamEvents,
     ],
-    promoNotices: sentinel.promoNotices,
-    sentinelReplayEvents: sentinel.replayEvents,
+    auPortfolio,
+    cardActivations,
   };
 }

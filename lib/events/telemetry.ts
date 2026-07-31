@@ -29,8 +29,41 @@ import { append } from './store';
 
 /** Side-effecting tools whose completion is an executed ACTION, not a plain
  * evidence fetch (docs/wire-contract.md §5 — 'action.executed' vs
- * 'tool.executed'). Extend this when P2 agents add their own action tools. */
-const ACTION_TOOL_NAMES = new Set(['proposeDueDateChange', 'sendOutreachDraft']);
+ * 'tool.executed'). Extend this whenever an agent gains an action tool.
+ *
+ * `updateContactInfo` (v3, lib/agents/servicing/tools.ts) is the servicing
+ * chatbot's contact-information write — the first mutation in `lib/soe`
+ * (CARDINAL_V3_AU_BRIEF.md §7c) and unambiguously an executed action, not a
+ * read. Its human approval decision is logged independently by the stream
+ * route (`approval.granted`/`approval.denied`, `actor: 'human'`), so the
+ * omission would not have lost the gate — but it would have hidden the
+ * WRITE from anyone scanning the Event Log for `action.executed`, which is
+ * precisely the reviewer this distinction exists for.
+ *
+ * `saveRules` and `executeBatchRemoval` (branch `demo-aug4`,
+ * lib/agents/ops/tools.ts) are the ops chat's two gated actions — DEMO_THESIS.md
+ * use case 1's G1 (adopting rules into the rule store) and G2 (the batch
+ * authorized-user removal). Both are genuine writes: G1 mutates
+ * lib/rules/store.ts, and G2 executes the remediation endpoint's mock batch and
+ * mints its confirmation id. Their human approval decisions are logged
+ * independently by the stream route (`approval.granted`/`approval.denied`,
+ * `actor: 'human'`); these entries are the agent-side record that the approved
+ * action actually ran.
+ *
+ * `queueActivationOutreach` is the card-activation policy's Gate 2 — the ops
+ * chat's other write, and DEMO_THESIS.md use case 3's "human-in-the-loop takes
+ * some action on the result." Mocked downstream like the batch removal, and
+ * logged here for the same reason: what a reviewer scanning for
+ * `action.executed` must see is that an approved batch actually ran. */
+const ACTION_TOOL_NAMES = new Set([
+  'proposeDueDateChange',
+  'sendOutreachDraft',
+  'updateContactInfo',
+  'saveRules',
+  'executeBatchRemoval',
+  'queueActivationOutreach',
+  'activateCard',
+]);
 
 interface RunContext {
   runId: string;

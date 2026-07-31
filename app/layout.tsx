@@ -1,18 +1,14 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import { ShellNav } from "@/components/shell/nav";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Geist/Geist Mono are vendored (public/fonts + app/fonts.css) instead of
+// next/font/google: a build-time fetch of fonts.googleapis.com is a network
+// dependency the demo must not have. The woff2 slices and @font-face blocks
+// (unicode ranges, weight axis, fallback metrics) are byte-for-byte what
+// next/font produced; --font-geist-sans/--font-geist-mono now live in
+// globals.css.
 
 export const metadata: Metadata = {
   title: "Cardinal — Agent Command Center",
@@ -26,10 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" className="dark h-full antialiased">
       <body className="flex min-h-screen">
         <TooltipProvider>
           <ShellNav />

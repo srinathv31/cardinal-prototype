@@ -1,9 +1,10 @@
-// graph-rehearsal tests (W2.1 gate). Two groups:
+// graph-rehearsal tests. Two groups:
 //
 //   - "fixture invariants" — plain assertions on the steps array, pinning
 //     the constraints graph-rehearsal.ts's header comment promises (no
-//     approval/audit/render/emit steps, human-watchable pacing, every node
-//     cycling through working and done, edges both animating and clearing);
+//     approval/audit/render/stage-action steps, human-watchable pacing,
+//     every node cycling through working and done, edges both animating and
+//     clearing);
 //   - "playback" — an end-to-end ScenarioPlayer pass, fake timers throughout
 //     (player.test.ts's convention: the player's one-pending-timer
 //     discipline means vi.runAllTimers() drives it deterministically with
@@ -14,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { graphRehearsalScenario } from './graph-rehearsal';
 import { ScenarioPlayer } from './player';
 import { SENTINEL_NODE_IDS } from './types';
-import type { GraphStep, NarrationStep } from './types';
+import type { ChatTurnStep, GraphStep } from './types';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -26,11 +27,13 @@ afterEach(() => {
 
 const { steps } = graphRehearsalScenario;
 const graphSteps = steps.filter((s): s is GraphStep => s.type === 'graphStep');
-const narrationSteps = steps.filter((s): s is NarrationStep => s.type === 'narration');
+const narrationSteps = steps.filter(
+  (s): s is ChatTurnStep => s.type === 'chatTurn' && s.role === 'agent',
+);
 
 describe('graphRehearsalScenario — fixture invariants', () => {
-  it('carries no awaitApproval, emitEvent, render, or auditWrite steps', () => {
-    const forbiddenTypes = new Set(['awaitApproval', 'emitEvent', 'render', 'auditWrite']);
+  it('carries no awaitApproval, awaitStageAction, render, or auditWrite steps', () => {
+    const forbiddenTypes = new Set(['awaitApproval', 'awaitStageAction', 'render', 'auditWrite']);
     expect(steps.some((s) => forbiddenTypes.has(s.type))).toBe(false);
   });
 

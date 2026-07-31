@@ -181,6 +181,69 @@ export const approvalCardPropsSchema = z.object({
   rationale: z.string().optional(),
   /** Labels of evidence components already rendered in this run. */
   evidence: z.array(z.string()).default([]),
+  /**
+   * v3 addition (CARDINAL_V3_AU_BRIEF.md §3 Act III beat 7, W3.3) — a bulk
+   * action's explicit scope/count expression, so "Remove 87 authorized
+   * users from 74 accounts and notify 74 primary cardholders" states its
+   * blast radius with every count structurally present, not buried inside
+   * `description`'s prose. Additive and optional: every v1 caller that
+   * never sets it is unaffected, and the renderer
+   * (components/registry/approval-card.tsx) only shows this block behind a
+   * presence check, so an untouched v1 card stays pixel-identical.
+   */
+  scope: z
+    .object({
+      /** Preformatted headline with the counts embedded in the sentence
+       * itself, e.g. "Remove 87 authorized users from 74 accounts and
+       * notify 74 primary cardholders." */
+      summary: z.string(),
+      /** Optional structured count chips backing `summary`, for a reader
+       * who wants the numbers isolated from the sentence, e.g.
+       * { label: "Accounts", value: "74" }. */
+      counts: z
+        .array(z.object({ label: z.string(), value: z.string() }))
+        .min(1)
+        .max(6)
+        .optional(),
+    })
+    .optional(),
+  /**
+   * v3 addition (brief §3 Act III beat 7, W3.3) — a "Review the list"
+   * disclosure so the presenter can see what they're approving before
+   * approving it. Rows are preformatted and supplied by the scenario step
+   * (or, for a real agent, by server-side tool execution); the card never
+   * fetches them itself (v1 invariant 5b). Deliberately generic
+   * (`primary`/`secondary`/`detail`, not AU-specific field names) so any
+   * future bulk-approval flow can reuse this shape without coupling the
+   * shared v1 registry to Sentinel/AU-policy semantics — Act III's own
+   * exception rows (lib/sentinel/exception-fixture.ts's `AuExceptionRow`)
+   * map onto it as accountLabel → primary, authorizedUser + ruleShortName
+   * → secondary + detail. Same additive/optional/presence-check contract
+   * as `scope` above.
+   */
+  reviewList: z
+    .object({
+      /** Disclosure trigger label, e.g. "Review the list (87)". */
+      label: z.string(),
+      rows: z
+        .array(
+          z.object({
+            /** e.g. "Nguyen household · ••4821". */
+            primary: z.string(),
+            /** e.g. "AU: Marcus Chen". */
+            secondary: z.string(),
+            /** Preformatted right-aligned detail, e.g.
+             * "R1 · Product Eligibility". */
+            detail: z.string().optional(),
+          }),
+        )
+        .min(1)
+        .max(25),
+      /** Same showing/total footnote convention as `TransactionTable`
+       * (this file) — one preformatted sentence, e.g. "Showing 25 of 87." */
+      footnote: z.string().optional(),
+    })
+    .optional(),
 });
 export type ApprovalCardProps = z.infer<typeof approvalCardPropsSchema>;
 

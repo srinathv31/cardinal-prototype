@@ -15,7 +15,7 @@
 // unmounting it. It's positioned `absolute inset-0` over the stage's
 // context-rail column — the stage wraps ContextRail + PolicyPanel in a
 // `relative` container (separate work item) — and matches context-rail.tsx
-// / event-replay-rail.tsx's sibling panel chrome (rounded-xl border/card/
+// / conversation-rail.tsx's sibling panel chrome (rounded-xl border/card/
 // ring, uppercase tracking-wide header) so the drawer reads as part of the
 // same column, not a modal dialog.
 
@@ -23,11 +23,6 @@ import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PolicyPanelState } from "@/lib/sentinel/scenario/types";
 import type { PolicyDocument } from "@/lib/sentinel/policy";
-
-/** Fixed literal (brief §5's seed filename) — the mock file-pick's document
- * isn't derived from anything, it's presenter theater. Reused for the
- * preview chip so both states name the same file. */
-const POLICY_FILENAME = "BT-Servicing-Policy-2026.docx";
 
 interface PolicyPanelProps {
   panel: PolicyPanelState;
@@ -38,6 +33,12 @@ interface PolicyPanelProps {
 
 export function PolicyPanel({ panel, dropEnabled, onDrop, document }: PolicyPanelProps) {
   const open = panel !== "closed";
+  /** The dropped file's name, derived from the document's own id rather than
+   * held as a second literal beside it (v3 renamed the policy and the old
+   * hardcoded filename survived the rename — exactly the drift deriving it
+   * prevents). Both the drop target and the preview chip name the same file
+   * because they read the same source. */
+  const filename = `${document.id}.docx`;
 
   return (
     <section
@@ -54,9 +55,9 @@ export function PolicyPanel({ panel, dropEnabled, onDrop, document }: PolicyPane
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
         {panel === "drop" ? (
-          <DropZone dropEnabled={dropEnabled} onDrop={onDrop} />
+          <DropZone dropEnabled={dropEnabled} onDrop={onDrop} filename={filename} />
         ) : panel === "preview" ? (
-          <DocumentPreview document={document} />
+          <DocumentPreview document={document} filename={filename} />
         ) : null}
       </div>
     </section>
@@ -67,7 +68,15 @@ export function PolicyPanel({ panel, dropEnabled, onDrop, document }: PolicyPane
  * player's `awaitStageAction('policy-drop')` gate — dimmed and inert until
  * that gate is actually pending, so a presenter can't jump ahead of the
  * scenario by clicking early. */
-function DropZone({ dropEnabled, onDrop }: { dropEnabled: boolean; onDrop: () => void }) {
+function DropZone({
+  dropEnabled,
+  onDrop,
+  filename,
+}: {
+  dropEnabled: boolean;
+  onDrop: () => void;
+  filename: string;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-4 py-6">
       <div className="flex w-full flex-col items-center gap-5 rounded-xl border-2 border-dashed border-border px-6 py-12">
@@ -86,7 +95,7 @@ function DropZone({ dropEnabled, onDrop }: { dropEnabled: boolean; onDrop: () =>
           <FileText className="size-9 shrink-0 text-primary" aria-hidden />
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate text-lg font-semibold text-foreground">
-              {POLICY_FILENAME}
+              {filename}
             </span>
             <span className="text-base text-muted-foreground">48 KB · Servicing policy</span>
           </span>
@@ -101,11 +110,17 @@ function DropZone({ dropEnabled, onDrop }: { dropEnabled: boolean; onDrop: () =>
  * 1-page typographic rendering of the seeded policy content, straight from
  * `document` — no lib/sentinel/policy import here, the stage passes the
  * value down. */
-function DocumentPreview({ document }: { document: PolicyDocument }) {
+function DocumentPreview({
+  document,
+  filename,
+}: {
+  document: PolicyDocument;
+  filename: string;
+}) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 px-4 py-4">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <span className="text-base font-semibold text-foreground">{POLICY_FILENAME}</span>
+        <span className="text-base font-semibold text-foreground">{filename}</span>
         <span className="inline-flex items-center rounded-full bg-success/15 px-2.5 py-0.5 text-sm font-semibold text-success">
           Received · routing to Policy Analyst
         </span>

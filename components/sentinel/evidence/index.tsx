@@ -2,26 +2,36 @@
 
 // Sentinel's one routing layer over the v1 EvidenceRenderer — v1 components
 // delegate unchanged (unknown names still fall through to its
-// console-error-never-throw path, demo-safety brief §8); Sentinel-only
-// components (wire-contract §9.6) route here. P4 (W4.2) fulfills the
-// evidence-cards note: `BTEventDetail` and `RuleCitation` join `RuleDiff`
-// below. Addendum v2.1 (post-P4) adds `DecisionCard` — Act III's
-// response-routes card — the same way.
+// console-error-never-throw path, demo-safety brief §9); Sentinel-only
+// components (wire-contract §9.6) route here: `RuleDiff`, `RuleCitation`,
+// `DecisionCard`, P3's `PolicyExceptionTable` / `RemediationReport`, and
+// branch `demo-aug4`'s ops-chat pair `ViolationsDashboard` / `ReportCard`
+// (DEMO_BUILD_PLAN.md "UI components"). Every member of
+// `SentinelRenderInstruction` must have a branch here — the fall-through hands
+// `instruction` to v1's `EvidenceRenderer`, which only accepts the v1
+// `RenderInstruction`, so an unrouted Sentinel component is a type error rather
+// than a silent blank. v3 removed `BTEventDetail` (docs/v3-migration-map.md
+// §2b) — there is no single-event hero card when the investigation is an
+// aggregate sweep over the whole book, so its import and routing branch are
+// gone along with it.
 //
 // `OutreachDraftCard` is the one v1 registry member routed HERE instead of
 // delegated: v1's EvidenceRenderer refuses it by design (in v1 it renders
 // from action-tool state, never from renderEvidence output — see its
 // console-error guard), but on the Sentinel stream the scripted scenario is
 // the draft's source and a `render` step is its only path to the screen
-// (brief §3 Act III's ops-notification beat, wire-contract §9.6). Routing
-// it here keeps v1's guard — and v1's semantics — untouched.
+// (wire-contract §9.6). Routing it here keeps v1's guard — and v1's
+// semantics — untouched.
 
 import { EvidenceRenderer, OutreachDraftCard } from "@/components/registry";
 import type { SentinelRenderInstruction } from "@/lib/sentinel/registry";
-import { BTEventDetail } from "./bt-event-detail";
 import { DecisionCard } from "./decision-card";
+import { PolicyExceptionTable } from "./policy-exception-table";
+import { RemediationReport } from "./remediation-report";
+import { ReportCard } from "./report-card";
 import { RuleCitation } from "./rule-citation";
 import { RuleDiff } from "./rule-diff";
+import { ViolationsDashboard } from "./violations-dashboard";
 
 export function SentinelEvidenceRenderer({
   instruction,
@@ -29,12 +39,18 @@ export function SentinelEvidenceRenderer({
   instruction: SentinelRenderInstruction;
 }) {
   if (instruction.component === "RuleDiff") return <RuleDiff {...instruction.props} />;
-  if (instruction.component === "BTEventDetail")
-    return <BTEventDetail {...instruction.props} />;
   if (instruction.component === "RuleCitation")
     return <RuleCitation {...instruction.props} />;
   if (instruction.component === "DecisionCard")
     return <DecisionCard {...instruction.props} />;
+  if (instruction.component === "PolicyExceptionTable")
+    return <PolicyExceptionTable {...instruction.props} />;
+  if (instruction.component === "RemediationReport")
+    return <RemediationReport {...instruction.props} />;
+  if (instruction.component === "ViolationsDashboard")
+    return <ViolationsDashboard {...instruction.props} />;
+  if (instruction.component === "ReportCard")
+    return <ReportCard {...instruction.props} />;
   if (instruction.component === "OutreachDraftCard")
     return <OutreachDraftCard {...instruction.props} />;
   return <EvidenceRenderer instruction={instruction} />;

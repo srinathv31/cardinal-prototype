@@ -2,6 +2,8 @@
 
 import {
   Activity,
+  ClipboardCheck,
+  Headset,
   LayoutDashboard,
   MessageSquare,
   ScrollText,
@@ -13,12 +15,19 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ResetControl } from "./reset-control";
 
+// `parked: true` = not part of the demo-aug4 three-use-case demo
+// (DEMO_THESIS.md): the route still exists and its tests stay green, but the
+// nav renders it dimmed and non-clickable so a presenter cannot wander off
+// the demo path. Un-park by deleting the flag — nothing else changed.
 const links = [
-  { href: "/", label: "Command Center", icon: LayoutDashboard },
-  { href: "/workflows", label: "Workflow Canvas", icon: Workflow },
-  { href: "/runs", label: "Agent Runs", icon: Activity },
-  { href: "/ask", label: "Ask", icon: MessageSquare },
-  { href: "/sentinel", label: "Sentinel", icon: Shield },
+  { href: "/", label: "Command Center", icon: LayoutDashboard, parked: true },
+  { href: "/workflows", label: "Workflow Canvas", icon: Workflow, parked: true },
+  { href: "/runs", label: "Agent Runs", icon: Activity, parked: true },
+  { href: "/ask", label: "Ask", icon: MessageSquare, parked: true },
+  // DEMO_THESIS.md use case 1's surface (branch `demo-aug4`) — the ops chat.
+  { href: "/ops", label: "Ops", icon: ClipboardCheck },
+  { href: "/servicing", label: "Servicing", icon: Headset },
+  { href: "/sentinel", label: "Sentinel", icon: Shield, parked: true },
   { href: "/events", label: "Event Log", icon: ScrollText },
 ];
 
@@ -28,7 +37,8 @@ export function ShellNav() {
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="px-5 py-6">
-        <Link href="/" className="block">
+        {/* Brand goes to /ops while Command Center is parked (demo-aug4). */}
+        <Link href="/ops" className="block">
           <span className="text-lg font-semibold tracking-widest text-sidebar-foreground">
             CARDINAL
           </span>
@@ -38,7 +48,20 @@ export function ShellNav() {
         </Link>
       </div>
       <nav className="flex flex-1 flex-col gap-1 px-3">
-        {links.map(({ href, label, icon: Icon }) => {
+        {links.map(({ href, label, icon: Icon, parked }) => {
+          if (parked) {
+            return (
+              <span
+                key={href}
+                aria-disabled="true"
+                title="Parked — not part of this demo"
+                className="flex cursor-not-allowed items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground/40 select-none"
+              >
+                <Icon className="size-4" />
+                {label}
+              </span>
+            );
+          }
           const active =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (

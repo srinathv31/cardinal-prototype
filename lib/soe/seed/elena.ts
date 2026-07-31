@@ -40,6 +40,12 @@ export function buildElena(anchor: Date): {
     fullName: 'Elena Ruiz',
     dateOfBirth: '1991-11-19',
     email: 'elena.ruiz@example.com',
+    // v3 contact fields (CARDINAL_V3_AU_BRIEF.md §7c) — not exercised by the
+    // servicing chatbot (Patel is the pinned cardholder,
+    // lib/agents/servicing/identity.ts) but seeded for the rest of v1's cast
+    // so `Party.phone`/`mailingAddress` reads as real data across the board.
+    phone: '(602) 555-0134',
+    mailingAddress: '918 Cactus Wren Dr, Phoenix, AZ 85014',
   };
 
   const account: Account = {

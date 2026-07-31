@@ -1,9 +1,10 @@
-// ScenarioPlayer (W0.2, brief §6) — the whole Sentinel engine. A plain,
-// framework-free class: no React import (client-safe but not
+// ScenarioPlayer (P0 W0.5, CARDINAL_V3_AU_BRIEF.md §6) — the whole Sentinel
+// engine, re-pointed at the v3 step union (docs/v3-migration-map.md §4). A
+// plain, framework-free class: no React import (client-safe but not
 // React-coupled), no network calls (the player itself never fetches — the
-// stage wires its `auditWrite` messages to `POST /api/sentinel/audit` in
-// P1), no `Math.random()`, no `Date.now()` dependence for logic (brief §8:
-// "no randomness anywhere in the scenario path"; audit-entry timestamps are
+// stage wires its `auditWrite` messages to `POST /api/sentinel/audit`), no
+// `Math.random()`, no `Date.now()` dependence for logic (brief §9: "no
+// randomness anywhere in the scenario path"; audit-entry timestamps are
 // assigned server-side by lib/events/store.ts on append, not here).
 //
 // Timer discipline: exactly one pending `setTimeout` at a time, armed via
@@ -12,27 +13,50 @@
 // waits into small ticks would stretch every delay ~4× in real playback
 // (invisible under fake timers, fatal on stage). `pause()` computes the
 // remaining delay from `Date.now() − waitArmedAt` — wall-clock bookkeeping
-// only, which never reaches the message log, so determinism (brief §8) is
+// only, which never reaches the message log, so determinism (brief §9) is
 // untouched, and fake timers mock `Date` in lockstep so tests stay exact.
-// `scheduleAfter` is also what narration's inter-chunk gaps use, so the same
-// pause/resume mechanics cover both "waiting to start a step" and "waiting
-// between typing-effect chunks" for free.
+// `scheduleAfter` is also what a `chatTurn`'s inter-chunk gaps use, so the
+// same pause/resume mechanics cover both "waiting to start a step" and
+// "waiting between typing-effect chunks" for free.
 //
-// This is 100% scripted (brief §9) — no imports from 'ai', no live model.
+// v3 changes from v2 (docs/v3-migration-map.md §4): `emitEvent` and
+// `railReset` are gone — there is no event replay rail in v3, so nothing
+// clears it between acts. `narration` has collapsed into `chatTurn` with
+// `role: 'agent'`; a `role: 'user'` chatTurn is new — it publishes the
+// presenter's typed (or scripted) prompt instantly and verbatim into
+// `conversation`, which replaces `railEvents` on the snapshot. `counter` is
+// reshaped to `{ scanned, exceptions, remediated }` for an aggregate sweep
+// instead of a night of streamed events. `resolveStageAction` widens to
+// take an optional `text`, which a `'prompt'` gate echoes verbatim as a
+// user `chatTurn` before resolving — the player never string-matches it
+// against `suggested` (wire-contract §9.2's verbatim-echo rule, §9.5
+// guarantee 5).
+//
+// P3b addition: `AwaitApprovalStep.onDeny` (brief §3, "reject path must work
+// on demand" — types.ts's doc comment has the contract). The playback cursor
+// no longer walks `scenario.steps` directly; it walks a private working copy
+// (`this.steps`, seeded fresh from `scenario.steps` in `initializeState`) so
+// a denial carrying `onDeny` can splice the remainder of THAT copy without
+// ever touching the scenario's own array — `reset()` re-seeds `this.steps`
+// from `scenario.steps` again, so the original script is never at risk of
+// staying spliced across a reset. See `resolveApproval` below for the
+// splice itself.
+//
+// This is 100% scripted (brief §10) — no imports from 'ai', no live model.
 
 import type {
   ActMarkerStep,
   AuditWriteStep,
   AwaitApprovalStep,
   AwaitStageActionStep,
+  ChatTurnStep,
   CounterUpdateStep,
-  EmitEventStep,
   GraphStep,
-  NarrationStep,
   PolicyPanelStep,
-  RailResetStep,
   RenderStep,
+  ScenarioStep,
   ScenarioTimedStep,
+  SentinelChatTurn,
   SentinelContextItem,
   SentinelGraphEdge,
   SentinelNodeId,
@@ -45,7 +69,7 @@ import type {
 import { SENTINEL_NODE_IDS } from './types';
 import type { EventLogEntry } from '@/lib/events/types';
 
-/** Typing-effect granularity (brief §8): fixed 3-character chunks on a
+/** Typing-effect granularity (brief §9): fixed 3-character chunks on a
  * fixed 16ms cadence (scaled by speed) — deterministic, no jitter. */
 const NARRATION_CHUNK_SIZE = 3;
 const NARRATION_TICK_MS = 16;
@@ -64,19 +88,26 @@ function idleGraphNodes(): Record<SentinelNodeId, SentinelNodeState> {
   return nodes;
 }
 
-type InstantStep =
-  | EmitEventStep
-  | GraphStep
-  | RenderStep
-  | CounterUpdateStep
-  | AuditWriteStep
-  | PolicyPanelStep
-  | RailResetStep;
+/** Every timed step except an agent `chatTurn`, which `executeTimedStep`
+ * branches off to the chunked narration path before `executeInstant` is
+ * ever called. A user `chatTurn` — the only kind that reaches here — still
+ * publishes and resolves in one synchronous tick. */
+type InstantStep = GraphStep | RenderStep | CounterUpdateStep | AuditWriteStep | PolicyPanelStep | ChatTurnStep;
 
 export class ScenarioPlayer {
   private readonly scenario: SentinelScenario;
   private readonly onMessage?: (message: SentinelStreamMessage) => void;
   private readonly listeners = new Set<() => void>();
+
+  /** The WORKING step queue — seeded from `scenario.steps` in
+   * `initializeState()`, never the scenario's own array. Everything that
+   * walks playback (`play`, `advance`, `jumpToAct`) reads this, not
+   * `scenario.steps`, so `resolveApproval`'s `onDeny` splice (below) can
+   * replace the remainder of a run without mutating the checked-in scenario
+   * object — `reset()` calling `initializeState()` again is what restores
+   * the pristine queue (header comment; types.ts's `AwaitApprovalStep.onDeny`
+   * doc comment). */
+  private steps: ScenarioStep[] = [];
 
   // Playback cursor + timer bookkeeping.
   private stepIndex = 0;
@@ -93,8 +124,8 @@ export class ScenarioPlayer {
   private status: SentinelStageState['status'] = 'idle';
   private act: SentinelStageState['act'] = 0;
   private speed: SentinelStageState['speed'] = 1;
-  private railEvents: SentinelStageState['railEvents'] = [];
-  private counter: SentinelStageState['counter'] = { events: 0, violations: 0, flagged: 0 };
+  private conversation: SentinelStageState['conversation'] = [];
+  private counter: SentinelStageState['counter'] = { scanned: 0, exceptions: 0, remediated: 0 };
   private counterCaption: string | undefined = undefined;
   private graphNodes: Record<SentinelNodeId, SentinelNodeState> = idleGraphNodes();
   private animatedEdges: SentinelGraphEdge[] = [];
@@ -115,6 +146,7 @@ export class ScenarioPlayer {
   constructor(scenario: SentinelScenario, options?: { onMessage?: (message: SentinelStreamMessage) => void }) {
     this.scenario = scenario;
     this.onMessage = options?.onMessage;
+    this.steps = scenario.steps.slice();
     this.snapshot = this.buildSnapshot();
   }
 
@@ -137,7 +169,7 @@ export class ScenarioPlayer {
     // 'idle', stepIndex 0 pointing at act I's marker) and resuming after a
     // mid-demo act boundary (status 'paused' for the same reason).
     if (this.remainingWaitMs === null) {
-      const current = this.scenario.steps[this.stepIndex];
+      const current = this.steps[this.stepIndex];
       if (current?.type === 'actMarker') {
         this.consumeMarker(current);
       }
@@ -170,9 +202,9 @@ export class ScenarioPlayer {
     this.commit();
   }
 
-  /** Full return to pre-Act-I state, synchronous (brief §8: <2s trivially —
+  /** Full return to pre-Act-I state, synchronous (brief §9: <2s trivially —
    * there's no async work here at all). Cancels any pending timer AND any
-   * pending approval. */
+   * pending approval or stage action. */
   reset(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer);
@@ -184,14 +216,16 @@ export class ScenarioPlayer {
 
   /**
    * Rehearsal shortcut. Resets, then fast-forwards through every step
-   * strictly before `act`'s marker with zero delay: narration is emitted
-   * whole in one final `narrationDelta` (`done: true`) instead of chunked,
-   * and any `awaitApproval` encountered along the way is auto-resolved as
-   * approved (publishing `approvalRequest` + `approvalResolved` +
-   * the derived `auditWrite` back-to-back) — there's no presenter around to
-   * click through a rehearsal. Likewise, any `awaitStageAction` is
-   * auto-resolved (publishing `stageActionRequest` + `stageActionResolved`
-   * back-to-back), same rationale. Earlier `actMarker`s are consumed (and
+   * strictly before `act`'s marker with zero delay: an agent `chatTurn` is
+   * emitted whole in one final `narrationDelta` (`done: true`) instead of
+   * chunked, a user `chatTurn` publishes normally, any `awaitApproval`
+   * encountered along the way is auto-resolved as approved (publishing
+   * `approvalRequest` + `approvalResolved` + the derived `auditWrite`
+   * back-to-back), and any `awaitStageAction` is auto-resolved the same way
+   * (publishing `stageActionRequest`, then — for a `'prompt'` gate carrying
+   * `suggested` — the echoed `chatTurn` exactly as a typed resolution would
+   * produce it, then `stageActionResolved`) — there's no presenter around to
+   * click through a rehearsal. Earlier `actMarker`s are consumed (and
    * published) exactly as normal playback would; the TARGET marker for
    * `act` is left unconsumed so the player "ends paused at the marker" —
    * identical to how a live run pauses at an act boundary, just arrived at
@@ -199,7 +233,7 @@ export class ScenarioPlayer {
    */
   jumpToAct(act: 1 | 2 | 3): void {
     this.reset();
-    const steps = this.scenario.steps;
+    const steps = this.steps;
 
     while (this.stepIndex < steps.length) {
       const step = steps[this.stepIndex];
@@ -220,14 +254,24 @@ export class ScenarioPlayer {
       if (step.type === 'awaitStageAction') {
         // No presenter around to click through a rehearsal — same rationale
         // as the approval auto-resolve above: publish the request and its
-        // resolution back-to-back and keep fast-forwarding.
-        this.publish({ type: 'stageActionRequest', id: step.id, action: step.action });
-        this.publish({ type: 'stageActionResolved', id: step.id });
+        // resolution back-to-back and keep fast-forwarding. A 'prompt' gate
+        // carrying `suggested` echoes it first, exactly as a typed
+        // resolution would (resolveStageAction below) — a policy-drop gate,
+        // or a prompt gate with no `suggested`, has nothing to echo.
+        this.publish({ type: 'stageActionRequest', id: step.id, action: step.action, suggested: step.suggested });
+        if (step.action === 'prompt' && step.suggested !== undefined) {
+          const promptId = `${step.id}-prompt`;
+          this.publish({ type: 'chatTurn', id: promptId, role: 'user', text: step.suggested });
+          this.conversation.push({ id: promptId, role: 'user', text: step.suggested, done: true });
+          this.publish({ type: 'stageActionResolved', id: step.id, text: step.suggested });
+        } else {
+          this.publish({ type: 'stageActionResolved', id: step.id });
+        }
         this.stepIndex++;
         continue;
       }
 
-      if (step.type === 'narration') {
+      if (step.type === 'chatTurn' && step.role === 'agent') {
         this.emitNarrationDelta(step.id, step.text, true, step.text);
         this.stepIndex++;
         continue;
@@ -249,7 +293,20 @@ export class ScenarioPlayer {
     this.commit();
   }
 
-  /** No-op unless this approval is the one currently pending. */
+  /**
+   * No-op unless this approval is the one currently pending. On a DENIAL
+   * whose step carries `onDeny` (types.ts's `AwaitApprovalStep.onDeny` doc
+   * comment), the working step queue (`this.steps`) is truncated right
+   * after this step and `onDeny`'s steps are appended in its place —
+   * REPLACING the remainder of the run, not inserting alongside it. This
+   * only ever touches `this.steps`, the per-instance working copy
+   * `initializeState()` re-seeds from `scenario.steps` on every
+   * construction/`reset()` — the scenario's own array is never written to,
+   * so a later `reset()` always restores the pristine original script
+   * (player.test.ts's deny → reset → replay coverage). An approval, or a
+   * denial with no `onDeny`, leaves `this.steps` untouched — exactly
+   * today's behavior.
+   */
   resolveApproval(id: string, approved: boolean): void {
     if (this.status !== 'awaiting-approval' || this.pendingApproval === null || this.pendingApproval.id !== id) {
       return;
@@ -257,15 +314,32 @@ export class ScenarioPlayer {
     const step = this.pendingApproval;
     this.pendingApproval = null;
     this.handleApprovalResolution(step, approved);
+    if (!approved && step.onDeny) {
+      this.steps = [...this.steps.slice(0, this.stepIndex + 1), ...step.onDeny];
+    }
     this.stepIndex++;
     this.status = 'playing';
     this.commit();
     this.advance();
   }
 
-  /** No-op unless this stage action is the one currently pending — mirrors
-   * `resolveApproval`. */
-  resolveStageAction(id: string): void {
+  /**
+   * No-op unless this stage action is the one currently pending — mirrors
+   * `resolveApproval`. `text` is whatever the presenter actually submitted
+   * (`undefined` for a suggestion-chip click with nothing typed, or for a
+   * `'policy-drop'` resolution, which never carries typed text).
+   *
+   * Order on a genuine resolve: if `text` is non-empty AND the pending
+   * action is `'prompt'`, publish and append the verbatim echo turn first;
+   * then publish `stageActionResolved` (carrying `text` whenever it was
+   * given, omitted otherwise); then advance exactly as `resolveApproval`
+   * does. The player NEVER compares `text` to the step's `suggested` value
+   * and never branches on its content (wire-contract §9.2's verbatim-echo
+   * rule, §9.5 guarantee 5) — a `'policy-drop'` gate ignores `text` for the
+   * echo (there is no rail turn to put it in) but still reports it on
+   * `stageActionResolved`.
+   */
+  resolveStageAction(id: string, text?: string): void {
     if (
       this.status !== 'awaiting-stage-action' ||
       this.pendingStageAction === null ||
@@ -273,8 +347,21 @@ export class ScenarioPlayer {
     ) {
       return;
     }
+    const step = this.pendingStageAction;
     this.pendingStageAction = null;
-    this.publish({ type: 'stageActionResolved', id });
+
+    if (step.action === 'prompt' && text !== undefined && text.length > 0) {
+      const promptId = `${id}-prompt`;
+      this.publish({ type: 'chatTurn', id: promptId, role: 'user', text });
+      this.conversation.push({ id: promptId, role: 'user', text, done: true });
+      this.commit();
+    }
+
+    if (text !== undefined) {
+      this.publish({ type: 'stageActionResolved', id, text });
+    } else {
+      this.publish({ type: 'stageActionResolved', id });
+    }
     this.stepIndex++;
     this.status = 'playing';
     this.commit();
@@ -302,13 +389,13 @@ export class ScenarioPlayer {
    * completes, after a marker is consumed, and after an approval or stage
    * action resolves. */
   private advance(): void {
-    if (this.stepIndex >= this.scenario.steps.length) {
+    if (this.stepIndex >= this.steps.length) {
       this.status = 'done';
       this.commit();
       return;
     }
 
-    const step = this.scenario.steps[this.stepIndex];
+    const step = this.steps[this.stepIndex];
 
     if (step.type === 'actMarker') {
       this.status = 'paused';
@@ -325,7 +412,7 @@ export class ScenarioPlayer {
     }
 
     if (step.type === 'awaitStageAction') {
-      this.publish({ type: 'stageActionRequest', id: step.id, action: step.action });
+      this.publish({ type: 'stageActionRequest', id: step.id, action: step.action, suggested: step.suggested });
       this.pendingStageAction = step;
       this.status = 'awaiting-stage-action';
       this.commit();
@@ -336,7 +423,7 @@ export class ScenarioPlayer {
   }
 
   private executeTimedStep(step: ScenarioTimedStep): void {
-    if (step.type === 'narration') {
+    if (step.type === 'chatTurn' && step.role === 'agent') {
       this.beginNarration(step);
       return;
     }
@@ -346,9 +433,6 @@ export class ScenarioPlayer {
 
   private executeInstant(step: InstantStep): void {
     switch (step.type) {
-      case 'emitEvent':
-        this.handleEmitEvent(step);
-        return;
       case 'graphStep':
         this.handleGraphStep(step);
         return;
@@ -364,8 +448,12 @@ export class ScenarioPlayer {
       case 'policyPanel':
         this.handlePolicyPanel(step);
         return;
-      case 'railReset':
-        this.handleRailReset();
+      case 'chatTurn':
+        // Only a `role: 'user'` turn ever reaches here — `executeTimedStep`
+        // branches `role: 'agent'` off to the chunked narration path before
+        // `executeInstant` is called at all (types.ts's ChatTurnStep doc
+        // comment: a human typed it, so it publishes whole and instantly).
+        this.handleUserChatTurn(step);
         return;
     }
   }
@@ -406,10 +494,23 @@ export class ScenarioPlayer {
   }
 
   // ---------------------------------------------------------------------
-  // Narration (chunked typing effect)
+  // Chat turns (v3's only narration step — types.ts's ChatTurnStep doc
+  // comment)
   // ---------------------------------------------------------------------
 
-  private beginNarration(step: NarrationStep): void {
+  /** `role: 'user'` — published whole and instantly: a human typed it, the
+   * audience already watched that happen. Appends to `conversation`
+   * verbatim and leaves `headline` untouched — the graph ticker reports
+   * what the system is doing, not what the presenter typed. */
+  private handleUserChatTurn(step: ChatTurnStep): void {
+    this.publish({ type: 'chatTurn', id: step.id, role: 'user', text: step.text });
+    this.conversation.push({ id: step.id, role: 'user', text: step.text, done: true });
+    this.commit();
+  }
+
+  /** `role: 'agent'` — the chunked typing effect, unchanged mechanics from
+   * v2's narration. */
+  private beginNarration(step: ChatTurnStep): void {
     const chunks = chunkText(step.text, NARRATION_CHUNK_SIZE);
     this.playNarrationChunks(step.id, chunks, 0, '');
   }
@@ -428,12 +529,16 @@ export class ScenarioPlayer {
     );
   }
 
+  /** Upserts into `conversation` (same-id replace-in-place, `role:
+   * 'agent'`) — v3 moves narration out of `contextItems` entirely: it lives
+   * in the conversation rail now, not the context rail (brief §4). Still
+   * drives `headline`, exactly as before. */
   private emitNarrationDelta(id: string, delta: string, done: boolean, textSoFar: string): void {
     this.publish({ type: 'narrationDelta', id, delta, done });
-    const index = this.contextItems.findIndex((item) => item.kind === 'narration' && item.id === id);
-    const item: SentinelContextItem = { kind: 'narration', id, text: textSoFar, done };
-    if (index === -1) this.contextItems.push(item);
-    else this.contextItems[index] = item;
+    const index = this.conversation.findIndex((turn) => turn.id === id);
+    const turn: SentinelChatTurn = { id, role: 'agent', text: textSoFar, done };
+    if (index === -1) this.conversation.push(turn);
+    else this.conversation[index] = turn;
     this.headline = textSoFar;
     this.commit();
   }
@@ -471,21 +576,6 @@ export class ScenarioPlayer {
   // Per-step-type publish + derived-state handlers
   // ---------------------------------------------------------------------
 
-  private handleEmitEvent(step: EmitEventStep): void {
-    this.publish({
-      type: 'emitEvent',
-      event: step.event,
-      highlight: step.highlight,
-      complianceBadge: step.complianceBadge,
-    });
-    this.railEvents.push({
-      event: step.event,
-      highlight: step.highlight ?? false,
-      complianceBadge: step.complianceBadge,
-    });
-    this.commit();
-  }
-
   private handleGraphStep(step: GraphStep): void {
     this.publish({
       type: 'graphStep',
@@ -514,7 +604,7 @@ export class ScenarioPlayer {
    * REPLACES it in place (position preserved) rather than appending a new
    * one — how Act II's rule cards flip proposed→active and grow
    * progressively, mirroring `emitNarrationDelta`'s same-id replace-in-place
-   * for narration. Different ids still append, exactly as before. */
+   * for chat turns. Different ids still append, exactly as before. */
   private handleRender(step: RenderStep): void {
     this.publish({ type: 'render', id: step.id, instruction: step.instruction });
     const item: SentinelContextItem = { kind: 'render', id: step.id, instruction: step.instruction };
@@ -541,15 +631,6 @@ export class ScenarioPlayer {
     this.commit();
   }
 
-  /** Act III's fresh observation window (types.ts's `RailResetStep` doc
-   * comment) — clears ONLY `railEvents`; the counter is a separate,
-   * declarative `counterUpdate` the scenario pairs alongside this step. */
-  private handleRailReset(): void {
-    this.publish({ type: 'railReset' });
-    this.railEvents = [];
-    this.commit();
-  }
-
   private writeAudit(entry: Omit<EventLogEntry, 'id' | 'timestamp'>): void {
     const message = this.publish({ type: 'auditWrite', entry });
     if (message.type === 'auditWrite') {
@@ -569,7 +650,14 @@ export class ScenarioPlayer {
     return message;
   }
 
+  /** Resets the working step queue from `scenario.steps` (fresh copy, never
+   * the same array reference — `scenario.steps` itself is NEVER mutated) as
+   * well as every other piece of derived state, so `reset()` restores a
+   * byte-identical pristine run even after a prior `onDeny` splice replaced
+   * the tail of `this.steps` (types.ts's `AwaitApprovalStep.onDeny` doc
+   * comment; player.test.ts's deny → reset → replay coverage). */
   private initializeState(): void {
+    this.steps = this.scenario.steps.slice();
     this.stepIndex = 0;
     this.remainingWaitMs = null;
     this.waitArmedAt = null;
@@ -580,8 +668,8 @@ export class ScenarioPlayer {
     this.status = 'idle';
     this.act = 0;
     this.speed = 1;
-    this.railEvents = [];
-    this.counter = { events: 0, violations: 0, flagged: 0 };
+    this.conversation = [];
+    this.counter = { scanned: 0, exceptions: 0, remediated: 0 };
     this.counterCaption = undefined;
     this.graphNodes = idleGraphNodes();
     this.animatedEdges = [];
@@ -607,7 +695,7 @@ export class ScenarioPlayer {
       status: this.status,
       act: this.act,
       speed: this.speed,
-      railEvents: this.railEvents.slice(),
+      conversation: this.conversation.slice(),
       counter: { ...this.counter },
       counterCaption: this.counterCaption,
       graph: {
@@ -621,7 +709,11 @@ export class ScenarioPlayer {
       messages: this.messages.slice(),
       policyPanel: this.policyPanel,
       pendingStageAction: this.pendingStageAction
-        ? { id: this.pendingStageAction.id, action: this.pendingStageAction.action }
+        ? {
+            id: this.pendingStageAction.id,
+            action: this.pendingStageAction.action,
+            suggested: this.pendingStageAction.suggested,
+          }
         : null,
     });
   }
