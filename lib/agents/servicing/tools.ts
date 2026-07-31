@@ -25,7 +25,7 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import { evidenceSpecSchema } from '@/lib/registry/evidence';
+import { servicingEvidenceSpecSchema, type EvidenceSpec } from '@/lib/registry/evidence';
 import { updatePartyContact } from '@/lib/soe';
 import { activateCardForPersona } from '@/lib/sentinel/activate-card';
 import { identityForPersona, type ServicingIdentity, type ServicingPersona } from './identity';
@@ -81,8 +81,14 @@ export function createServicingTools(ctx: ServicingToolsContext) {
       'category. Never state a figure in narration without also calling this ' +
       'tool to back it with a rendered component; the output is the only ' +
       'thing that reaches the screen.',
-    inputSchema: evidenceSpecSchema,
-    execute: async (input) => resolvers.resolveEvidence(input),
+    // Narrowed to the kinds resolveEvidence actually dispatches, and FLAT —
+    // the local llama.cpp endpoint emits `{}` for anyOf-shaped tool schemas
+    // (see the schema's header in lib/registry/evidence.ts). Every valid
+    // flat input is byte-compatible with the EvidenceSpec union member it
+    // narrows, so the cast below is shape-preserving; a mismatched
+    // component/kind pair still lands on resolveEvidence's existing throw.
+    inputSchema: servicingEvidenceSpecSchema,
+    execute: async (input) => resolvers.resolveEvidence(input as EvidenceSpec),
   });
 
   /**

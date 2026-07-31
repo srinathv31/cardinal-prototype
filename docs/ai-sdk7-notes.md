@@ -58,6 +58,18 @@ listed here before using it. Do not use v5/v6 patterns (`maxSteps`,
 
 ## Misc gotchas
 
+- **Local llama.cpp endpoint + union-shaped tool schemas (live-llm Phase C,
+  verified 2026-07-30):** any tool whose `inputSchema` converts to an
+  `anyOf`-shaped JSON Schema at the top level (zod `discriminatedUnion` /
+  `union`) makes the local Qwen endpoint emit `{}` as the tool arguments —
+  the SDK then fails input validation before `execute` ever runs, surfacing
+  as an endless `tool-input-error`/`tool-output-error` retry loop with the
+  masked "An error occurred." text. Head-to-head repro: identical prompt,
+  nested-union schema → `{}`; flat object with `z.enum` discriminators →
+  perfect arguments. Keep live-path tool input schemas FLAT (objects +
+  enums); `servicingEvidenceSpecSchema` (lib/registry/evidence.ts) is the
+  worked example. Hosted providers (Anthropic/OpenAI) do not need this.
+
 - Multi-agent routes can't be typed over a union: `createAgentUIStreamResponse`
   needs `agent` and `uiMessages` generics to be the SAME agent's types, and a
   union of `ToolLoopAgent`s isn't assignable (tool sets differ). Dispatch one

@@ -181,3 +181,48 @@ export const evidenceSpecSchema = z.discriminatedUnion('component', [
   }),
 ]);
 export type EvidenceSpec = z.infer<typeof evidenceSpecSchema>;
+
+// Servicing-only narrowing of the union above (live-llm Phase C), FLAT by
+// necessity. Two live-model findings drove this shape:
+//  1. Narrowing at all: with the scripted model, "each agent's resolver
+//     dispatch throws on unowned kinds" was enough — the script always
+//     emitted owned kinds. A live model routing over the FULL union can pick
+//     a schema-valid-but-unowned member and turn a customer question into a
+//     resolver throw.
+//  2. Flat, not a discriminatedUnion: zod unions convert to `anyOf` JSON
+//     Schema, and the local llama.cpp endpoint emits `{}` for any tool whose
+//     input schema is anyOf-shaped at the top level (verified head-to-head
+//     2026-07-30: nested-union → `{}` and a validation-error loop; this flat
+//     shape → a perfect call). See docs/ai-sdk7-notes.md.
+// The JSON emitted for every VALID call is byte-compatible with the
+// EvidenceSpec union — `{ component, source: { kind, months?, limit? } }` —
+// so the scripted servicing script's emitted inputs, the assistant-parts
+// renderers, and resolveEvidence's dispatch are all unchanged. kind uniquely
+// determines component; a mismatched pair still hits resolveEvidence's
+// existing throw (the pre-existing backstop for bad dispatch). months/limit
+// use .default() so post-parse inputs always carry them; the MetricRow
+// resolvers simply ignore the extras.
+export const servicingEvidenceSpecSchema = z.object({
+  component: z
+    .enum(['MetricRow', 'CategoryPie', 'TransactionTable'])
+    .describe(
+      'Which registered component renders the evidence. Valid pairings: ' +
+        'MetricRow ← servicing-next-payment | servicing-account-summary | servicing-next-statement; ' +
+        'CategoryPie ← servicing-category-spend; ' +
+        'TransactionTable ← servicing-recent-transactions.',
+    ),
+  source: z.object({
+    kind: z
+      .enum([
+        'servicing-next-payment',
+        'servicing-account-summary',
+        'servicing-next-statement',
+        'servicing-category-spend',
+        'servicing-recent-transactions',
+      ])
+      .describe("Which of the signed-in cardholder's data stories to render — this picks the data."),
+    months: spendMonths,
+    limit: rowLimit,
+  }),
+});
+export type ServicingEvidenceSpec = z.infer<typeof servicingEvidenceSpecSchema>;
