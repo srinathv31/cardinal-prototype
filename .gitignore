@@ -43,3 +43,4 @@ next-env.d.ts
 
 # playwright-mcp verification artifacts
 .playwright-mcp/
+ai-sdk-v7.md
