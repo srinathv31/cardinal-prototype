@@ -219,8 +219,27 @@ export const opsScript: AgentScript = {
       // Fresh, independent read of the same resolver the tool called, so every
       // figure below is the evaluator's own (CLAUDE.md 5a).
       const violations = await resolveViolations();
+      // The non-ok narrations must NOT repeat `violations.message`: the tool
+      // result already carries it, and EvidencePart renders it as the note
+      // card, so an identical narration shows the same sentence twice. The
+      // narration's job here is the next step the note can't give.
+      if (violations.status === 'no-rules') {
+        return {
+          narration:
+            `No ${violations.policyId} rules are approved yet, so this sweep has nothing to run against. ` +
+            'Upload the policy document and approve its rules at the gate — then ask me again and I will sweep the book.',
+          toolCalls: [],
+          done: true,
+        };
+      }
       if (violations.status !== 'ok') {
-        return { narration: violations.message, toolCalls: [], done: true };
+        return {
+          narration:
+            `A clean book — every one of the ${violations.scanned} ${policyScanUnit(violations.policyId)} passed, ` +
+            'so there is nothing to remediate and no report to write.',
+          toolCalls: [],
+          done: true,
+        };
       }
 
       const { exceptions, accountsAffected, scanned, byRule, policyId } = violations;
