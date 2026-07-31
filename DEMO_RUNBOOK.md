@@ -8,7 +8,7 @@ three use cases; everything else in the app is parked.
 ```bash
 npm run build                                    # once per code state
 DEMO_ANCHOR_DATE=2026-08-05 npm start            # http://localhost:3000
-node scripts/demo-replay.mjs                     # go / no-go — expect "30/30 beats passed" + "RESULT: PASS"
+node scripts/demo-replay.mjs                     # go / no-go — expect "19/19 beats passed" + "RESULT: PASS"
 ```
 
 - **Pin `DEMO_ANCHOR_DATE=2026-08-05` on the run command, on BOTH days.** Seed dates are day-offsets

@@ -13,38 +13,25 @@
 // and cannot evaluate inside the React Server graph. Server components (e.g.
 // the dashboard KPI row) import from here and get client references.
 //
-// OutreachDraftCard and ApprovalCard are registry members but are not driven
-// by RenderInstruction (they render from action-tool parts/approval state
-// per wire-contract §4), so EvidenceRenderer does not handle them here.
+// ApprovalCard is a registry member but is not driven by RenderInstruction
+// (it renders from action-tool parts/approval state per wire-contract §4),
+// so EvidenceRenderer does not handle it here.
+//
+// live-llm cleanup (LIVE_LLM_PLAN.md Phase A): TrendChart, PaymentHistoryTable,
+// RiskBadge, BTTimeline, InterestProjectionChart, PartyGraph, BarBreakdown, and
+// OutreachDraftCard served the deleted payment-health/bt-lifecycle/au-growth/ask
+// agents and the deleted Sentinel scenario player — deleted along with them.
+// `lib/registry/schemas.ts` still types their `RenderInstruction` union
+// members (that file is out of scope this pass), so they fall through to the
+// generic "unknown component" branch below rather than a dedicated case.
 
 import type { RenderInstruction } from "@/lib/registry/schemas";
 import { MetricRow } from "./metric-row";
-import { TrendChart } from "./trend-chart";
-import { PaymentHistoryTable } from "./payment-history-table";
-import { RiskBadge } from "./risk-badge";
-import { BTTimeline } from "./bt-timeline";
-import { InterestProjectionChart } from "./interest-projection-chart";
-import { PartyGraph } from "./party-graph";
-import { OutreachDraftCard } from "./outreach-draft-card";
 import { ApprovalCard } from "./approval-card";
-import { BarBreakdown } from "./bar-breakdown";
 import { CategoryPie } from "./category-pie";
 import { TransactionTable } from "./transaction-table";
 
-export {
-  MetricRow,
-  TrendChart,
-  PaymentHistoryTable,
-  RiskBadge,
-  BTTimeline,
-  InterestProjectionChart,
-  PartyGraph,
-  OutreachDraftCard,
-  ApprovalCard,
-  BarBreakdown,
-  CategoryPie,
-  TransactionTable,
-};
+export { MetricRow, ApprovalCard, CategoryPie, TransactionTable };
 
 export function EvidenceRenderer({
   instruction,
@@ -54,27 +41,12 @@ export function EvidenceRenderer({
   switch (instruction.component) {
     case "MetricRow":
       return <MetricRow {...instruction.props} />;
-    case "TrendChart":
-      return <TrendChart {...instruction.props} />;
-    case "PaymentHistoryTable":
-      return <PaymentHistoryTable {...instruction.props} />;
-    case "RiskBadge":
-      return <RiskBadge {...instruction.props} />;
-    case "BTTimeline":
-      return <BTTimeline {...instruction.props} />;
-    case "InterestProjectionChart":
-      return <InterestProjectionChart {...instruction.props} />;
-    case "PartyGraph":
-      return <PartyGraph {...instruction.props} />;
-    case "BarBreakdown":
-      return <BarBreakdown {...instruction.props} />;
     case "CategoryPie":
       return <CategoryPie {...instruction.props} />;
     case "TransactionTable":
       return <TransactionTable {...instruction.props} />;
-    case "OutreachDraftCard":
     case "ApprovalCard":
-      // Registry members, but not evidence — they render from action-tool
+      // Registry member, but not evidence — it renders from action-tool
       // parts / approval state (wire-contract §3–4), never from
       // renderEvidence output. Nothing to paint here; not an error.
       console.error(

@@ -4,14 +4,14 @@
 // module's AGENT_IDS/AGENT_NAMES are value exports reserved for server-side
 // agent dispatch (see that file's own header comment — "must never be
 // value-imported from a client component"), and this screen is a client
-// component (brief §5b). 'ask' is included ahead of its own parallel work
-// item (W3.3) landing in the registry — its runs already write to the
-// shared event store, so the filter needs the option now.
+// component (brief §5b).
+//
+// live-llm cleanup (LIVE_LLM_PLAN.md Phase A): payment-health, bt-lifecycle,
+// au-growth, and ask are deleted agents — only the two demo-phase surfaces
+// remain.
 export const AGENT_FILTER_OPTIONS: readonly { id: string; label: string }[] = [
-  { id: 'payment-health', label: 'Payment Health' },
-  { id: 'bt-lifecycle', label: 'BT Lifecycle' },
-  { id: 'au-growth', label: 'AU Growth' },
-  { id: 'ask', label: 'Ask' },
+  { id: 'ops', label: 'Ops' },
+  { id: 'servicing', label: 'Servicing' },
 ];
 
 export const AGENT_LABELS: Record<string, string> = Object.fromEntries(
